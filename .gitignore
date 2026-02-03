@@ -1,0 +1,31 @@
+node_modules
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+
+# Next.js
+.next/
+out/
+.next.cache/
+
+# Env/Secrets
+.env
+.env.local
+.env.*.local
+
+# OS/Editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Vercel
+.vercel/
+
+# Misc
+coverage/
+dist/

@@ -1,0 +1,802 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.rdp {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.rdp-month {
+  width: 100%;
+}
+
+.rdp-table {
+  margin: 0 auto;
+}
+
+body {
+  font-family: "Helvetica Neue", Helvetica, Arial, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", sans-serif;
+  background-color: white;
+  color: #0B0D10;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+  line-height: 1.5;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-space-grotesk), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  @apply font-semibold text-gray-900;
+}
+
+h4, h5, h6 {
+  font-family: "Helvetica Neue", Helvetica, Arial, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", sans-serif;
+  @apply font-medium text-gray-900;
+}
+
+h1 {
+  @apply text-3xl md:text-4xl leading-tight;
+}
+
+h2 {
+  @apply text-2xl md:text-3xl leading-snug;
+}
+
+.font-display {
+  font-family: var(--font-space-grotesk), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+}
+
+.font-numeric {
+  font-family: var(--font-roboto-mono), ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.font-mono {
+  font-family: var(--font-roboto-mono), ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+a {
+  color: #FEDD02;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: #E6C902;
+  text-decoration: underline;
+}
+
+button {
+  @apply font-medium text-sm px-4 py-2 rounded bg-gray-100 hover:bg-gray-200 transition;
+}
+
+input, textarea, select {
+  @apply border border-gray-300 rounded px-3 py-2 w-full text-sm text-gray-900 bg-white;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #FEDD02;
+  box-shadow: 0 0 0 2px rgba(254, 221, 2, 0.3);
+}
+
+/* ===== Map (Mapbox / react-map-gl) styles ===== */
+html, body, #__next { height: 100%; }
+
+.map-container {
+  position: relative;
+  width: 100%;
+  height: 320px;           /* mobile default */
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(11, 13, 16, 0.04);     /* subtle fallback while tiles load */
+}
+
+@media (min-width: 768px) {
+  .map-container { height: 420px; }
+}
+
+.mapboxgl-ctrl-geocoder {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 10px;
+  box-shadow: none;
+}
+.mapboxgl-ctrl-geocoder--input {
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+}
+
+.mapboxgl-ctrl-bottom-right .mapboxgl-ctrl,
+.mapboxgl-ctrl-bottom-left .mapboxgl-ctrl { margin: 8px; }
+
+.mapboxgl-popup { max-width: 260px; }
+.mapboxgl-canvas { outline: none; }
+
+/* Host availability calendar */
+.host-calendar .hero-month-picker {
+  width: 100%;
+  border-radius: 32px;
+  background: #ffffff;
+  padding: 1.5rem;
+  box-shadow: 0 18px 45px rgba(11, 13, 16, 0.08);
+}
+
+.host-calendar .hero-month-picker .rdp-months,
+.host-calendar .hero-month-picker .rdp-month {
+  width: 100%;
+}
+
+.host-calendar .hero-month-picker .rdp-caption_label {
+  font-weight: 600;
+  color: #0B0D10;
+  font-size: 1.2rem;
+}
+
+.host-calendar .rdp-day_button {
+  width: 100%;
+  height: 100%;
+  border-radius: 24px;
+  border: 1px solid rgba(11, 13, 16, 0.12);
+  background-color: #fff;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0.75rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.host-calendar .rdp-day_button::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: transparent;
+  margin-top: auto;
+}
+
+.host-calendar .rdp-day_button:hover {
+  border-color: #0B0D10;
+  box-shadow: inset 0 0 0 1px rgba(11, 13, 16, 0.12);
+}
+
+.host-calendar .rdp-nav_button {
+  border-radius: 9999px;
+  border: 1px solid rgba(11, 13, 16, 0.12);
+  background-color: white;
+  color: #0B0D10;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.host-calendar .rdp-nav_button:hover {
+  border-color: #0B0D10;
+  transform: translateY(-1px);
+}
+
+.host-calendar .rdp-day_button.host-cal-today,
+.host-calendar .rdp-day.host-cal-today .rdp-day_button {
+  border-color: #0B0D10;
+  box-shadow: inset 0 0 0 1px rgba(11, 13, 16, 0.2);
+}
+
+.host-calendar .rdp-day_button.host-cal-directaccepted,
+.host-calendar .rdp-day.host-cal-directaccepted .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.05);
+  border-color: rgba(11, 13, 16, 0.2);
+  color: #0B0D10;
+}
+.host-calendar .rdp-day_button.host-cal-directaccepted::after {
+  background-color: #0B0D10;
+}
+
+.host-calendar .rdp-day_button.host-cal-directpending,
+.host-calendar .rdp-day.host-cal-directpending .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.04);
+  border-color: rgba(11, 13, 16, 0.15);
+  color: #4B5563;
+}
+.host-calendar .rdp-day_button.host-cal-directpending::after {
+  background-color: #4B5563;
+}
+
+.host-calendar .rdp-day_button.host-cal-manual,
+.host-calendar .rdp-day.host-cal-manual .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.04);
+  border-color: rgba(11, 13, 16, 0.12);
+}
+.host-calendar .rdp-day_button.host-cal-manual::after {
+  background-color: #4B5563;
+}
+
+.host-calendar .rdp-day_button.host-cal-airbnb,
+.host-calendar .rdp-day.host-cal-airbnb .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.04);
+  border-color: rgba(11, 13, 16, 0.12);
+}
+.host-calendar .rdp-day_button.host-cal-airbnb::after {
+  background-color: #4B5563;
+}
+
+.host-calendar .rdp-day_button.host-cal-vrbo,
+.host-calendar .rdp-day.host-cal-vrbo .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.04);
+  border-color: rgba(11, 13, 16, 0.12);
+}
+.host-calendar .rdp-day_button.host-cal-vrbo::after {
+  background-color: #4B5563;
+}
+
+.host-calendar .rdp-day_button.host-cal-other,
+.host-calendar .rdp-day.host-cal-other .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.04);
+  border-color: rgba(11, 13, 16, 0.12);
+}
+.host-calendar .rdp-day_button.host-cal-other::after {
+  background-color: #4B5563;
+}
+
+.host-calendar .rdp-day_button.host-cal-pending,
+.host-calendar .rdp-day.host-cal-pending .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.04);
+  border-color: rgba(11, 13, 16, 0.2);
+}
+.host-calendar .rdp-day_button.host-cal-pending::after {
+  background-color: rgba(11, 13, 16, 0.5);
+}
+
+.host-calendar .rdp-day_button.host-cal-past,
+.host-calendar .rdp-day.host-cal-past .rdp-day_button {
+  background-color: rgba(11, 13, 16, 0.04);
+  border-color: rgba(11, 13, 16, 0.12);
+  color: #4B5563;
+  opacity: 0.7;
+}
+
+.host-calendar .rdp-day_button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(254, 221, 2, 0.4);
+}
+
+/* Host timeline calendar */
+/* Airbnb-style stay date picker */
+/* Airbnb-style stay date picker */
+.airbnb-rdr .rdrCalendarWrapper {
+  width: 100%;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  color: #0B0D10;
+  font-family: inherit;
+  padding-bottom: 0;
+}
+
+.airbnb-rdr .rdrDateRangeWrapper {
+  width: 100%;
+}
+
+.airbnb-rdr .rdrMonthAndYearWrapper,
+.airbnb-rdr .rdrMonthPicker,
+.airbnb-rdr .rdrYearPicker,
+.airbnb-rdr .rdrDateDisplayWrapper,
+.airbnb-rdr .rdrDateDisplay,
+.airbnb-rdr .rdrDefinedRangesWrapper,
+.airbnb-rdr .rdrNextPrevButton {
+  display: none !important;
+}
+
+.airbnb-rdr .rdrMonths {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.25rem;
+}
+
+@media (min-width: 640px) {
+  .airbnb-rdr .rdrMonths {
+    flex-wrap: nowrap;
+    gap: 2rem;
+  }
+}
+
+.airbnb-rdr .rdrMonth {
+  flex: 1;
+  min-width: 280px;
+  padding: 0;
+}
+
+.airbnb-rdr .rdrMonthName {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #0B0D10;
+  font-family: var(--font-space-grotesk), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  margin-bottom: 0.75rem;
+  text-align: left;
+}
+
+.airbnb-rdr .rdrWeekDays {
+  margin-bottom: 0.15rem;
+}
+
+.airbnb-rdr .rdrWeekDay {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #4B5563;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-bottom: 0.2rem;
+}
+
+.airbnb-rdr .rdrDays {
+  row-gap: 6px;
+}
+
+.airbnb-rdr .rdrDay {
+  background: transparent;
+  height: 48px;
+  padding: 0;
+}
+
+.airbnb-rdr .rdrDayNumber span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 36px;
+  border-radius: 0;
+  border: 1px solid transparent;
+  background-color: transparent;
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: #4B5563;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.airbnb-rdr .rdrDayPassive .rdrDayNumber span {
+  color: rgba(11, 13, 16, 0.25);
+}
+
+.airbnb-rdr .rdrDayDisabled .rdrDayNumber span {
+  color: rgba(11, 13, 16, 0.2);
+}
+
+.airbnb-rdr .rdrDayPassive,
+.airbnb-rdr .rdrDayDisabled {
+  cursor: default;
+}
+
+.airbnb-rdr .rdrDayToday:not(.rdrDayPassive) .rdrDayNumber span {
+  border-color: transparent;
+  position: relative;
+}
+.airbnb-rdr .rdrDayToday:not(.rdrDayPassive) .rdrDayNumber span::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  background-color: #FEDD02;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+}
+
+.airbnb-rdr .rdrDayHovered .rdrDayNumber span,
+.airbnb-rdr .rdrDayStartPreview .rdrDayNumber span,
+.airbnb-rdr .rdrDayEndPreview .rdrDayNumber span {
+  background-color: rgba(254, 221, 2, 0.18);
+  border-color: transparent;
+}
+
+.airbnb-rdr .rdrInRange,
+.airbnb-rdr .rdrDayInPreview {
+  background-color: rgba(11, 13, 16, 0.08);
+  border-radius: 0;
+}
+
+.airbnb-rdr .rdrDayStartEdge,
+.airbnb-rdr .rdrDayEndEdge,
+.airbnb-rdr .rdrStartEdge,
+.airbnb-rdr .rdrEndEdge {
+  background-color: transparent;
+}
+
+.airbnb-rdr .rdrDayStartEdge .rdrDayNumber span,
+.airbnb-rdr .rdrDayEndEdge .rdrDayNumber span {
+  background-color: #0B0D10;
+  color: #ffffff;
+  border-color: #0B0D10;
+  border-radius: 9999px;
+}
+
+.airbnb-rdr .rdrDayStartPreview,
+.airbnb-rdr .rdrDayEndPreview {
+  border-color: transparent;
+}
+
+.airbnb-calendar-popover {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: #ffffff;
+  border-radius: 28px;
+  box-shadow: 0 30px 60px rgba(11, 13, 16, 0.1);
+  border: 1px solid rgba(11, 13, 16, 0.12);
+  padding: 6px 0 12px;
+  overflow: hidden;
+  width: min(90vw, 720px);
+  max-width: 760px;
+}
+
+.rdp-airbnb .rdp {
+  --rdp-accent-color: black;
+  --rdp-accent-background-color: black;
+}
+.rdp-airbnb .rdp-caption_label {
+  font-weight: 600;
+}
+
+.avyro-range-picker .rdp-caption_label {
+  font-family: var(--font-space-grotesk), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-weight: 500;
+}
+
+.avyro-range-picker .rdp-day {
+  padding: 0;
+}
+
+.avyro-range-picker .rdp-day_button {
+  width: 100%;
+  height: 36px;
+  border-radius: 0;
+  color: #4B5563;
+  position: relative;
+}
+
+.avyro-range-picker .rdp-day_today .rdp-day_button::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  background-color: #FEDD02;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+}
+
+.avyro-range-picker .rdp-day_button:hover {
+  background-color: rgba(254, 221, 2, 0.18);
+}
+
+.booking-range-picker {
+  font-family: "Helvetica Neue", Helvetica, Arial, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", sans-serif;
+}
+
+.booking-range-picker .rdp-caption_label {
+  font-family: "Helvetica Neue", Helvetica, Arial, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", sans-serif;
+  font-weight: 500;
+}
+
+.booking-range-picker .rdp-head_cell {
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4B5563;
+}
+
+.booking-range-picker .rdp-day {
+  padding: 0;
+}
+
+.booking-range-picker .rdp-day_button {
+  width: 100%;
+  height: 36px;
+  border-radius: 0;
+  color: #4B5563;
+  position: relative;
+}
+
+.booking-range-picker .rdp-day_today .rdp-day_button::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  background-color: #FEDD02;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+}
+
+.booking-range-picker .rdp-day_button:hover {
+  background-color: rgba(254, 221, 2, 0.18);
+}
+
+.booking-datepicker-wrapper {
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .booking-datepicker-wrapper {
+    min-width: 700px;
+  }
+}
+
+.booking-datepicker-popover {
+  width: 100%;
+}
+
+.booking-datepicker {
+  font-family: "Helvetica Neue", Helvetica, Arial, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", sans-serif;
+  background: transparent;
+  border: none;
+  width: 100%;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+@media (min-width: 1024px) {
+  .booking-datepicker {
+    min-width: 700px;
+  }
+}
+
+.booking-datepicker .react-datepicker__navigation {
+  display: none;
+}
+
+.booking-datepicker .react-datepicker__header {
+  background: transparent;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.booking-datepicker .react-datepicker__month-container {
+  padding: 0 8px 8px;
+  flex: 0 0 auto;
+}
+
+.booking-datepicker .react-datepicker__month {
+  margin: 0;
+}
+
+.booking-datepicker .react-datepicker__day-names {
+  margin-top: 0;
+}
+
+.booking-datepicker .react-datepicker__day-name {
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4B5563;
+  width: 40px;
+  line-height: 24px;
+}
+
+.booking-datepicker .react-datepicker__day {
+  color: #4B5563;
+  border-radius: 0;
+  width: 40px;
+  line-height: 36px;
+  margin: 0;
+  font-family: var(--font-roboto-mono), ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.booking-datepicker .react-datepicker__day:hover,
+.booking-datepicker .react-datepicker__day:focus,
+.booking-datepicker .react-datepicker__day--keyboard-selected {
+  background-color: rgba(254, 221, 2, 0.18);
+  border-radius: 0;
+  color: #0B0D10;
+}
+
+.booking-datepicker .react-datepicker__day--outside-month {
+  color: rgba(11, 13, 16, 0.2);
+}
+
+.booking-datepicker .react-datepicker__day--today {
+  position: relative;
+  font-weight: 500;
+}
+
+.booking-datepicker .react-datepicker__day--today::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  background-color: #FEDD02;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+}
+
+.booking-datepicker .react-datepicker__day--in-range,
+.booking-datepicker .react-datepicker__day--in-selecting-range {
+  background-color: rgba(11, 13, 16, 0.16);
+  color: #0B0D10;
+  border-radius: 0;
+}
+
+.booking-datepicker .react-datepicker__day--range-start,
+.booking-datepicker .react-datepicker__day--range-end,
+.booking-datepicker .react-datepicker__day--selecting-range-start,
+.booking-datepicker .react-datepicker__day--selecting-range-end {
+  background-color: #0B0D10 !important;
+  color: #ffffff !important;
+  border-radius: 9999px;
+}
+
+.booking-datepicker .react-datepicker__day--in-range.react-datepicker__day--range-start,
+.booking-datepicker .react-datepicker__day--in-range.react-datepicker__day--range-end,
+.booking-datepicker .react-datepicker__day--in-selecting-range.react-datepicker__day--range-start,
+.booking-datepicker .react-datepicker__day--in-selecting-range.react-datepicker__day--range-end {
+  background-color: #0B0D10 !important;
+  color: #ffffff !important;
+}
+
+.booking-datepicker .react-datepicker__day--range-start:hover,
+.booking-datepicker .react-datepicker__day--range-end:hover,
+.booking-datepicker .react-datepicker__day--selecting-range-start:hover,
+.booking-datepicker .react-datepicker__day--selecting-range-end:hover,
+.booking-datepicker .react-datepicker__day--selected {
+  background-color: #0B0D10 !important;
+  color: #ffffff !important;
+  border-radius: 9999px;
+}
+
+.availability-datepicker .react-datepicker__day--in-range,
+.availability-datepicker .react-datepicker__day--in-selecting-range {
+  background-color: rgba(11, 13, 16, 0.06);
+}
+
+.availability-datepicker .react-datepicker__day--disabled {
+  background-color: transparent;
+  color: #cbd5e1;
+}
+
+.availability-datepicker .react-datepicker__day--today {
+  position: relative;
+}
+
+.availability-datepicker .react-datepicker__day--today::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  background-color: #FEDD02;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+}
+
+.availability-datepicker {
+  justify-content: center;
+}
+
+.availability-datepicker .react-datepicker__month-container {
+  margin: 0 12px;
+}
+
+.availability-datepicker .avyro-day-booked {
+  position: relative;
+  background-color: rgba(11, 13, 16, 0.12) !important;
+  color: #4B5563 !important;
+  cursor: not-allowed;
+}
+
+.availability-datepicker .avyro-day-blocked {
+  position: relative;
+  background-color: rgba(11, 13, 16, 0.06) !important;
+  color: #6B7280 !important;
+  cursor: not-allowed;
+}
+
+.availability-datepicker .avyro-day-booked::after,
+.availability-datepicker .avyro-day-blocked::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 50%;
+  height: 1px;
+  background-color: rgba(11, 13, 16, 0.45);
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+    --radius: 0.5rem;
+  }
+  .dark {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

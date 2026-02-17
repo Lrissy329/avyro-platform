@@ -2,6 +2,7 @@ export const DEFAULT_PLATFORM_FEE_BPS = 1200; // 12%
 export const DEFAULT_STRIPE_VAR_BPS = 150; // 1.5%
 export const DEFAULT_STRIPE_FIXED_PENCE = 20; // 20p
 export const DEFAULT_MIN_GUEST_TOTAL_PENCE = 500; // £5.00
+export const PLATFORM_FEE_CAP_PENCE = 15000; // £150 cap
 
 export type AllInPricing = {
   host_net_total_pence: number;
@@ -9,6 +10,7 @@ export type AllInPricing = {
   platform_fee_est_pence: number;
   stripe_fee_est_pence: number;
   platform_margin_est_pence: number;
+  platform_fee_capped: boolean;
   platform_fee_bps: number;
   stripe_var_bps: number;
   stripe_fixed_pence: number;
@@ -24,22 +26,40 @@ const computeFeeEstimates = (
   stripeVarBps: number,
   stripeFixedPence: number
 ) => {
-  const platformFeeEstPence = Math.floor((guestTotalPence * platformFeeBps) / 10000);
+  const platformFeeEstRaw = Math.floor((guestTotalPence * platformFeeBps) / 10000);
+  const platformFeeEstPence = Math.min(platformFeeEstRaw, PLATFORM_FEE_CAP_PENCE);
+  const platformFeeCapped = platformFeeEstRaw > PLATFORM_FEE_CAP_PENCE;
   const stripeFeeEstPence =
     Math.floor((guestTotalPence * stripeVarBps) / 10000) + stripeFixedPence;
   const platformMarginRaw = guestTotalPence - hostNetTotalPence - stripeFeeEstPence;
-  return { platformFeeEstPence, stripeFeeEstPence, platformMarginRaw };
+  return { platformFeeEstPence, platformFeeCapped, stripeFeeEstPence, platformMarginRaw };
+};
+
+export const getPlatformFeeBps = (params: {
+  nights: number;
+  isFirstCompletedBooking: boolean;
+}): number => {
+  if (params.isFirstCompletedBooking) return 0;
+  if (params.nights >= 28) return 800;
+  if (params.nights >= 7) return 1000;
+  return 1200;
 };
 
 export function computeAllInPricing(params: {
   hostNetTotalPence: number;
+  nights: number;
+  isFirstCompletedBooking?: boolean;
   platformFeeBps?: number;
   stripeVarBps?: number;
   stripeFixedPence?: number;
   minGuestTotalPence?: number;
 }): AllInPricing {
   const hostNetTotalPence = Math.max(0, Math.round(params.hostNetTotalPence));
-  const platformFeeBps = params.platformFeeBps ?? DEFAULT_PLATFORM_FEE_BPS;
+  const nights = Math.max(1, Math.floor(params.nights));
+  const isFirstCompletedBooking = Boolean(params.isFirstCompletedBooking);
+  const platformFeeBps =
+    params.platformFeeBps ??
+    getPlatformFeeBps({ nights, isFirstCompletedBooking });
   const stripeVarBps = params.stripeVarBps ?? DEFAULT_STRIPE_VAR_BPS;
   const stripeFixedPence = params.stripeFixedPence ?? DEFAULT_STRIPE_FIXED_PENCE;
   const minGuestTotalPence = params.minGuestTotalPence ?? DEFAULT_MIN_GUEST_TOTAL_PENCE;
@@ -67,7 +87,8 @@ export function computeAllInPricing(params: {
     guestTotalPence = minGuestTotalPence;
   }
 
-  let { platformFeeEstPence, stripeFeeEstPence, platformMarginRaw } = computeFeeEstimates(
+  let { platformFeeEstPence, platformFeeCapped, stripeFeeEstPence, platformMarginRaw } =
+    computeFeeEstimates(
     guestTotalPence,
     hostNetTotalPence,
     platformFeeBps,
@@ -76,15 +97,22 @@ export function computeAllInPricing(params: {
   );
 
   // If rounding down reduced margin below zero, bump by £1 until margin is non-negative.
-  while (platformMarginRaw < 0) {
+  let guard = 0;
+  while (platformMarginRaw < 0 && guard < 100) {
     guestTotalPence += 100;
-    ({ platformFeeEstPence, stripeFeeEstPence, platformMarginRaw } = computeFeeEstimates(
+    ({ platformFeeEstPence, platformFeeCapped, stripeFeeEstPence, platformMarginRaw } =
+      computeFeeEstimates(
       guestTotalPence,
       hostNetTotalPence,
       platformFeeBps,
       stripeVarBps,
       stripeFixedPence
     ));
+    guard += 1;
+  }
+
+  if (platformMarginRaw < 0) {
+    throw new Error("Pricing margin could not be resolved with guard limit.");
   }
 
   const platformMarginEstPence = Math.max(platformMarginRaw, 0);
@@ -95,6 +123,7 @@ export function computeAllInPricing(params: {
     platform_fee_est_pence: platformFeeEstPence,
     stripe_fee_est_pence: stripeFeeEstPence,
     platform_margin_est_pence: platformMarginEstPence,
+    platform_fee_capped: platformFeeCapped,
     platform_fee_bps: platformFeeBps,
     stripe_var_bps: stripeVarBps,
     stripe_fixed_pence: stripeFixedPence,
@@ -104,16 +133,26 @@ export function computeAllInPricing(params: {
 export const computeGuestTotalPenceFromHostNet = (
   hostNetTotalPence: number,
   overrides?: {
+    nights?: number;
+    isFirstCompletedBooking?: boolean;
     platformFeeBps?: number;
     stripeVarBps?: number;
     stripeFixedPence?: number;
     minGuestTotalPence?: number;
   }
-) => computeAllInPricing({ hostNetTotalPence, ...overrides }).guest_total_pence;
+) =>
+  computeAllInPricing({
+    hostNetTotalPence,
+    nights: overrides?.nights ?? 1,
+    isFirstCompletedBooking: overrides?.isFirstCompletedBooking ?? false,
+    ...overrides,
+  }).guest_total_pence;
 
 export const computeGuestTotalMajorFromHostNet = (
   hostNetTotalMajor: number,
   overrides?: {
+    nights?: number;
+    isFirstCompletedBooking?: boolean;
     platformFeeBps?: number;
     stripeVarBps?: number;
     stripeFixedPence?: number;
@@ -138,7 +177,11 @@ export type PricingBreakdown = {
 };
 
 export function computePricingFromMinor(baseMinor: number): PricingBreakdownMinor {
-  const pricing = computeAllInPricing({ hostNetTotalPence: baseMinor });
+  const pricing = computeAllInPricing({
+    hostNetTotalPence: baseMinor,
+    nights: 1,
+    isFirstCompletedBooking: false,
+  });
   return {
     baseMinor,
     serviceFeeMinor: pricing.platform_fee_est_pence,

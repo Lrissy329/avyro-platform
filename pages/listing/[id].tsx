@@ -471,8 +471,8 @@ export default function ListingDetail() {
         host_id: hostId,
         guest_id: guestId,
         status: "pending",
-        check_in: checkInDate.toISOString().slice(0, 10),
-        check_out: checkOutDate.toISOString().slice(0, 10),
+        check_in_time: checkInDate.toISOString(),
+        check_out_time: checkOutDate.toISOString(),
         guests_total: totalGuests,
       });
       if (error) throw error;

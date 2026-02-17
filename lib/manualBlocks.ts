@@ -1,5 +1,5 @@
 import type { DateRange } from "@/lib/calendarTypes";
-import { formatISODate, startOfDay } from "@/lib/dateUtils";
+import { formatLocalDate, startOfDay } from "@/lib/dateUtils";
 
 export type BlockDatesPayload = {
   label: string;
@@ -52,8 +52,8 @@ export async function createManualBlockForRange(
     },
     body: JSON.stringify({
       listingId,
-      startDate: formatISODate(startOfDay(range.start)),
-      endDate: formatISODate(startOfDay(range.end)),
+      startDate: formatLocalDate(startOfDay(range.start)),
+      endDate: formatLocalDate(startOfDay(range.end)),
       notes: payload.notes?.trim() || undefined,
       label: payload.label,
       color: payload.color,

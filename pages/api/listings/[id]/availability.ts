@@ -100,7 +100,7 @@ export default async function handler(
           .lt("check_in_time", windowEndIso)
           .gt("check_out_time", windowStartIso)
           .in("stay_type", ["nightly", "crashpad"])
-          .or("status.is.null,status.not.in.(cancelled,declined)"),
+          .in("status", ["pending", "awaiting_payment", "approved", "confirmed", "paid"]),
         supabase
           .from("listing_calendar_blocks")
           .select("start_date, end_date")

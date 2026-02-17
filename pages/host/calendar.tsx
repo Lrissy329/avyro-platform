@@ -8,6 +8,7 @@ import { BookingDrawer } from "@/components/calendar/BookingDrawer";
 import { LinearCalendar } from "@/components/calendar/LinearCalendar";
 import { HourlyTimeline } from "@/components/calendar/HourlyTimeline";
 import { MonthCalendar } from "@/components/calendar/MonthCalendar";
+import { MessagingTray } from "@/components/host/MessagingTray";
 import type {
   LinearCalendarEvent,
   LinearCalendarListing,
@@ -27,7 +28,8 @@ import {
   startOfDay,
   startOfDayInTimeZone,
   startOfMonth,
-  formatISODate,
+  formatLocalDate,
+  formatRangeSummary,
 } from "@/lib/dateUtils";
 import {
   createManualBlockForRange,
@@ -269,6 +271,10 @@ export default function HostCalendarPage({
   const [blockError, setBlockError] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<LinearCalendarEvent | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [messageTrayOpen, setMessageTrayOpen] = useState(false);
+  const [messageConversationId, setMessageConversationId] = useState<string | null>(null);
+  const [messageGuestName, setMessageGuestName] = useState<string | null>(null);
+  const [messageBookingLabel, setMessageBookingLabel] = useState<string | null>(null);
 
   const [viewMode, setViewMode] = useState<CalendarView>("two-week");
   const [selectedListingId, setSelectedListingId] = useState<string>("all");
@@ -445,7 +451,7 @@ export default function HostCalendarPage({
       if (!state) return;
       const displayEnd = event.end > event.start ? addDays(event.end, -1) : event.end;
       rangeToDates(event.start, displayEnd).forEach((date) => {
-        const iso = formatISODate(date);
+        const iso = formatLocalDate(date);
         if (!map[event.listingId]) map[event.listingId] = {};
         const existing = map[event.listingId][iso];
         if (!existing || priority[state] > priority[existing]) {
@@ -556,6 +562,74 @@ export default function HostCalendarPage({
     [eventsState, hourlyEventsState, router]
   );
 
+  const handleMessageGuest = useCallback(async (event: LinearCalendarEvent) => {
+    if (!event?.id) return;
+    if (event.meta?.kind === "block") return;
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        alert("Please sign in to message guests.");
+        return;
+      }
+
+      let conversationId: string | null = null;
+
+      const { data: existingConversation, error: existingError } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("booking_id", event.id)
+        .maybeSingle();
+
+      if (existingError) {
+        console.error("Failed to check conversation", existingError.message);
+      }
+
+      if (existingConversation?.id) {
+        conversationId = existingConversation.id;
+      } else {
+        const { data: bookingRow, error: bookingError } = await supabase
+          .from("bookings")
+          .select("id, host_id, guest_id")
+          .eq("id", event.id)
+          .maybeSingle();
+
+        if (bookingError || !bookingRow?.host_id || !bookingRow?.guest_id) {
+          console.error("Unable to resolve booking participants", bookingError?.message);
+          alert("Unable to start a conversation for this booking.");
+          return;
+        }
+
+        const { data: createdConversation, error: createError } = await supabase
+          .from("conversations")
+          .insert({
+            booking_id: event.id,
+            host_id: bookingRow.host_id,
+            guest_id: bookingRow.guest_id,
+          })
+          .select("id")
+          .single();
+
+        if (createError || !createdConversation?.id) {
+          console.error("Failed to create conversation", createError?.message);
+          alert("Unable to start a conversation for this booking.");
+          return;
+        }
+
+        conversationId = createdConversation.id;
+      }
+
+      setMessageConversationId(conversationId);
+      setMessageGuestName(event.meta?.guestName ?? "Guest");
+      setMessageBookingLabel(formatRangeSummary(event.start, event.end));
+      setMessageTrayOpen(true);
+    } catch (err) {
+      console.error("Failed to open message tray", err);
+    }
+  }, []);
+
   const handleMonthDayClick = useCallback(
     (date: Date, listingId: string) => {
       const targetListingId = listingId || (selectedListingId !== "all" ? selectedListingId : null);
@@ -608,8 +682,8 @@ export default function HostCalendarPage({
 
   useEffect(() => {
     const fetchRates = async () => {
-      const startIso = formatISODate(rangeStart);
-      const endIso = formatISODate(rangeEnd);
+      const startIso = formatLocalDate(rangeStart);
+      const endIso = formatLocalDate(rangeEnd);
       const listingIds = visibleListingIds;
       if (!listingIds.length || viewMode !== "two-week") return;
 
@@ -632,7 +706,7 @@ export default function HostCalendarPage({
         cursor <= rangeEnd;
         cursor = addDays(cursor, 1)
       ) {
-        dayIsos.push(formatISODate(cursor));
+        dayIsos.push(formatLocalDate(cursor));
       }
 
       listingIds.forEach((id) => {
@@ -1031,11 +1105,22 @@ export default function HostCalendarPage({
           if (!open) setSelectedEvent(null);
         }}
         event={selectedEvent}
-        onMessageGuest={(event) => console.debug("Message guest", event.id)}
+        onMessageGuest={handleMessageGuest}
         onModifyBooking={(event) => console.debug("Modify booking", event.id)}
         onCancelBooking={handleCancelBooking}
         onDeleteBlock={handleDeleteBlock}
         onSaveBlockNotes={handleSaveBlockNotes}
+      />
+
+      <MessagingTray
+        open={messageTrayOpen}
+        onOpenChange={(open) => {
+          setMessageTrayOpen(open);
+          if (!open) setMessageConversationId(null);
+        }}
+        conversationId={messageConversationId}
+        guestName={messageGuestName}
+        bookingLabel={messageBookingLabel}
       />
 
       <BlockDatesModal

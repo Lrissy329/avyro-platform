@@ -59,9 +59,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "checkOutTime must be after checkInTime." });
   }
 
+  const diffDays = differenceInCalendarDays(checkOut, checkIn);
+
   const { data: listingRow, error: listingError } = await supabase
     .from("listings")
-    .select("id, user_id, rental_type, booking_unit")
+    .select("id, user_id, rental_type, booking_unit, is_instant_book, is_crew_ready")
     .eq("id", listingId)
     .maybeSingle();
 
@@ -72,6 +74,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   if (!listingRow?.user_id) {
     return res.status(404).json({ error: "Listing not found." });
+  }
+
+  const isInstantBook = Boolean((listingRow as any).is_instant_book);
+  const isCrewReady = Boolean((listingRow as any).is_crew_ready);
+  let requiredLevel = 0;
+  if (isInstantBook) {
+    requiredLevel = isCrewReady ? 2 : 1;
+    if (diffDays >= 14) requiredLevel = 2;
+  }
+
+  if (requiredLevel > 0) {
+    const { data: profileRow } = await supabase
+      .from("profiles")
+      .select("verification_level")
+      .eq("id", guestId)
+      .maybeSingle();
+    const level = Number(profileRow?.verification_level) || 0;
+    if (level < requiredLevel) {
+      return res
+        .status(403)
+        .json({ code: "VERIFICATION_REQUIRED", requiredLevel, error: "Verification required." });
+    }
   }
 
   const expectedStayType: BookingStayType =
@@ -96,7 +120,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     status: "awaiting_payment",
   };
 
-  const diffDays = differenceInCalendarDays(checkOut, checkIn);
   if (expectedStayType === "nightly" || expectedStayType === "crashpad") {
     if (diffDays < 1) {
       return res.status(400).json({

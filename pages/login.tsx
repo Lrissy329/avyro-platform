@@ -60,13 +60,13 @@ export default function LoginPage() {
       // Fallback: role-based routing
       const { data: profile } = await supabase
         .from("profiles")
-        .select("is_host, is_guest")
+        .select("role_host, role_guest")
         .eq("id", session.user.id)
         .maybeSingle();
 
-      if (profile?.is_host && !profile?.is_guest) safeReplace("/host/dashboard");
-      else if (profile?.is_guest && !profile?.is_host) safeReplace("/guest/dashboard");
-      else if (profile?.is_host && profile?.is_guest) safeReplace("/select-role");
+      if (profile?.role_host && !profile?.role_guest) safeReplace("/host/dashboard");
+      else if (profile?.role_guest && !profile?.role_host) safeReplace("/guest/dashboard");
+      else if (profile?.role_host && profile?.role_guest) safeReplace("/select-role");
       else safeReplace("/role-setup");
     })();
 

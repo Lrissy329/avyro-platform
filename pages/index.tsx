@@ -2,26 +2,14 @@
 // Home (Airbnb x Uber style) — sticky search, pill filters, card grid
 // Note: we avoid next/image for Supabase URLs
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "@/lib/supabaseClient";
 import { AppHeader } from "@/components/AppHeader";
-import * as ListingCardNS from "@/components/ListingCard";
+import HomeListingCard from "@/components/HomeListingCard";
 import SearchBar from "@/components/SearchBar";
-const ListingCardComp: any = (ListingCardNS as any).ListingCard;
+import { formatReviewLabel } from "@/lib/reviews";
 import { Listing } from "@/types/Listing";
-
-// Defensive fallback if the card export changes
-const FallbackListingCard = ({ listing }: { listing: any }) => (
-  <div className="text-sm">
-    <div className="font-medium line-clamp-1">{listing.title || "Untitled"}</div>
-    <div className="text-gray-500 line-clamp-1">{listing.location || listing.airport_code || ""}</div>
-    {listing.price_per_night != null && (
-      <div className="mt-1">£{listing.price_per_night} night</div>
-    )}
-  </div>
-);
-const CardRenderer: any = ListingCardComp || FallbackListingCard;
 
 // --- Helpers ---------------------------------------------------------------
 const AIRPORTS = [
@@ -53,6 +41,71 @@ function coerceType(x: any) {
   return (x?.type ?? x?.listing_type ?? "").toString();
 }
 
+const toNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const safeMinutes = (value: unknown): number | null => {
+  const n = toNumber(value);
+  if (n == null || !Number.isFinite(n)) return null;
+  return Math.round(n);
+};
+
+const normaliseTypeLabel = (value: unknown): string | null => {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const lower = value.replace(/_/g, " ").toLowerCase();
+  if (lower.includes("entire")) return "Entire place";
+  if (lower.includes("private")) return "Private room";
+  if (lower.includes("shared")) return "Shared room";
+  return value.replace(/_/g, " ");
+};
+
+const pickImageUrl = (listing: any, signedUrls: Record<string, string>): string => {
+  const candidates = [
+    signedUrls[listing.id],
+    listing.image_url,
+    listing.imageUrl,
+    listing.thumbnail,
+    Array.isArray(listing.photos) ? listing.photos[0] : listing.photos,
+  ].filter((src) => typeof src === "string" && src.length > 0) as string[];
+
+  return candidates[0] ?? "/placeholder.jpg";
+};
+
+const buildMetaLine = (listing: any): string | null => {
+  const airport = coerceAirport(listing);
+  const minutes =
+    safeMinutes(listing.drive_minutes_offpeak) ??
+    safeMinutes(listing.driveMinutesToAirport) ??
+    safeMinutes(listing.travelMinutesMin) ??
+    safeMinutes(listing.publicTransportMin) ??
+    safeMinutes(listing.taxiMin);
+  const typeLabel = normaliseTypeLabel(
+    listing.listing_type ?? listing.type ?? listing.roomType ?? listing.listingType
+  );
+  const sleeps = toNumber(listing.max_guests ?? listing.maxGuests);
+
+  const parts: string[] = [];
+  if (minutes != null && airport) parts.push(`${minutes} min to ${airport}`);
+  else if (airport) parts.push(airport);
+  if (typeLabel) parts.push(typeLabel);
+  else if (sleeps != null) parts.push(`Sleeps ${sleeps}`);
+
+  return parts.length ? parts.join(" · ") : null;
+};
+
+const getBadgeText = (listing: any): string => {
+  const unit = listing.booking_unit ?? listing.bookingUnit;
+  const rental = listing.rental_type ?? listing.rentalType;
+  if (unit === "hourly" || rental === "day_use" || rental === "split_rest") return "DAY-USE";
+  return "OVERNIGHT";
+};
+
 export default function Home() {
   const router = useRouter();
 
@@ -81,8 +134,8 @@ export default function Home() {
   const [profile, setProfile] = useState<{
     full_name: string | null;
     avatar_url: string | null;
-    is_host: boolean;
-    is_guest: boolean;
+    role_host: boolean;
+    role_guest: boolean;
   } | null>(null);
   const [notifications, setNotifications] = useState(0);
 
@@ -140,56 +193,6 @@ export default function Home() {
     setFilters((f) => ({ ...f, roomType: f.roomType === val ? "" : val }));
   const onSharedToggle = () => setFilters((f) => ({ ...f, sharedOnly: !f.sharedOnly }));
 
-  const getQueryValue = (key: string) =>
-    typeof router.query[key] === "string" ? (router.query[key] as string) : "";
-
-  const stayWindow = useMemo(() => {
-    const checkIn = getQueryValue("checkIn");
-    const checkOut = getQueryValue("checkOut");
-    if (!checkIn || !checkOut) return null;
-    const start = new Date(checkIn);
-    const end = new Date(checkOut);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
-    const checkInTime = getQueryValue("checkInTime");
-    const checkOutTime = getQueryValue("checkOutTime");
-    if (checkInTime) {
-      const [h, m] = checkInTime.split(":").map(Number);
-      if (Number.isFinite(h)) start.setHours(h, Number.isFinite(m) ? m : 0, 0, 0);
-    }
-    if (checkOutTime) {
-      const [h, m] = checkOutTime.split(":").map(Number);
-      if (Number.isFinite(h)) end.setHours(h, Number.isFinite(m) ? m : 0, 0, 0);
-    }
-    const durationMs = end.getTime() - start.getTime();
-    if (durationMs <= 0) return null;
-    return { durationMs, hasTimeSelection: Boolean(checkInTime || checkOutTime) };
-  }, [router.query]);
-
-  const stayNights = useMemo(() => {
-    if (!stayWindow) return 0;
-    const diffDays = stayWindow.durationMs / (1000 * 60 * 60 * 24);
-    return Math.max(1, Math.ceil(diffDays));
-  }, [stayWindow]);
-
-  const stayHours = useMemo(() => {
-    if (!stayWindow) return 0;
-    const diffHours = stayWindow.durationMs / (1000 * 60 * 60);
-    return Math.max(0.5, Math.ceil(diffHours * 2) / 2);
-  }, [stayWindow]);
-
-  const getStaySummary = (listing: any) => {
-    const bookingUnit =
-      listing?.booking_unit === "hourly" || listing?.bookingUnit === "hourly"
-        ? "hourly"
-        : "nightly";
-    if (bookingUnit === "hourly") {
-      return stayWindow?.hasTimeSelection && stayHours > 0
-        ? { units: stayHours, unitLabel: "hour" as const }
-        : null;
-    }
-    return stayNights > 0 ? { units: stayNights, unitLabel: "night" as const } : null;
-  };
-
   // New: handle search from SearchBar -> navigate to /search with query params
   const onSearchBar = (payload: any) => {
     const params = new URLSearchParams();
@@ -240,7 +243,7 @@ export default function Home() {
       if (user) {
         const { data: profileData } = await supabase
           .from("profiles")
-          .select("full_name, avatar_url, is_host, is_guest")
+          .select("full_name, avatar_url, role_host, role_guest")
           .eq("id", user.id)
           .single();
 
@@ -254,14 +257,14 @@ export default function Home() {
             ? {
                 full_name: profileData.full_name ?? user.email ?? null,
                 avatar_url: profileData.avatar_url ?? fallbackAvatar,
-                is_host: Boolean(profileData.is_host),
-                is_guest: Boolean(profileData.is_guest),
+                role_host: Boolean(profileData.role_host),
+                role_guest: Boolean(profileData.role_guest),
               }
             : {
                 full_name: user.email ?? null,
                 avatar_url: fallbackAvatar,
-                is_host: false,
-                is_guest: false,
+                role_host: false,
+                role_guest: false,
               }
         );
       } else {
@@ -276,14 +279,14 @@ export default function Home() {
 
     const fetchNotifications = async () => {
       try {
-        if (profile?.is_host) {
+        if (profile?.role_host) {
           const { count, error } = await supabase
             .from("bookings")
             .select("id", { count: "exact", head: true })
             .eq("host_id", sessionUser.id)
             .eq("status", "pending");
           if (!error) setNotifications(count ?? 0);
-        } else if (profile?.is_guest) {
+        } else if (profile?.role_guest) {
           const { count, error } = await supabase
             .from("bookings")
             .select("id", { count: "exact", head: true })
@@ -400,8 +403,6 @@ export default function Home() {
             .filter((listing: any) => listing.airport_code || listing.airportCode)
             .slice(0, 8)}
           signedUrls={signedUrls}
-          router={router}
-          getStaySummary={getStaySummary}
           emptyMessage="No airport stays yet. Check back soon."
         />
         <SectionCategory
@@ -416,8 +417,6 @@ export default function Home() {
             )
             .slice(0, 8)}
           signedUrls={signedUrls}
-          router={router}
-          getStaySummary={getStaySummary}
           emptyMessage="No day‑use listings yet. Try overnight stays for now."
         />
         <SectionCategory
@@ -427,8 +426,6 @@ export default function Home() {
             .filter((listing: any) => listing.rental_type === "crashpad" || listing.rental_type === "extended_stay")
             .slice(0, 8)}
           signedUrls={signedUrls}
-          router={router}
-          getStaySummary={getStaySummary}
           emptyMessage="No extended stays yet. New listings are coming soon."
         />
       </div>
@@ -528,8 +525,6 @@ type SectionCategoryProps = {
   description?: string;
   listings: any[];
   signedUrls: Record<string, string>;
-  router: any;
-  getStaySummary: (listing: any) => { units: number; unitLabel: "night" | "hour" } | null;
   emptyMessage?: string;
 };
 
@@ -538,8 +533,6 @@ function SectionCategory({
   description,
   listings,
   signedUrls,
-  router,
-  getStaySummary,
   emptyMessage,
 }: SectionCategoryProps) {
   return (
@@ -553,37 +546,31 @@ function SectionCategory({
       {listings.length === 0 ? (
         <p className="mt-4 text-sm text-slate-500">{emptyMessage ?? "No listings available."}</p>
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <div className="flex gap-6">
-            {listings.map((listing: any) => {
-              const photoUrl = signedUrls[listing.id];
-              const validPhoto = photoUrl && /^https?:\/\//.test(photoUrl);
-              // Pass resolved photo to the card and let it handle rendering
-              const cardListing = {
-                ...listing,
-                photos: Array.isArray(listing.photos)
-                  ? listing.photos
-                  : listing.photos
-                  ? [listing.photos]
-                  : [],
-              };
-              if (validPhoto) {
-                cardListing.photos = [photoUrl, ...cardListing.photos];
-              }
-              return (
-                <div
-                  key={listing.id}
-                  onClick={() => router.push(`/listing/${listing.id}`)}
-                  className="cursor-pointer group min-w-[300px] max-w-xs"
-                >
-                  <CardRenderer
-                    listing={cardListing as any}
-                    staySummary={getStaySummary(cardListing)}
-                  />
-                </div>
-              );
-            })}
-          </div>
+        <div className="mt-4 flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory">
+          {listings.map((listing: any) => {
+            const imageUrl = pickImageUrl(listing, signedUrls);
+            const title = listing.title || listing.name || "Untitled listing";
+            const rating = toNumber(listing.review_overall ?? listing.reviewOverall);
+            const reviewCount = toNumber(listing.review_total ?? listing.reviewTotal);
+            const ratingLabel = rating != null ? formatReviewLabel(rating) : undefined;
+            const meta = buildMetaLine(listing);
+            const badgeText = getBadgeText(listing);
+
+            return (
+              <div key={listing.id} className="snap-start">
+                <HomeListingCard
+                  id={listing.id}
+                  title={title}
+                  imageUrl={imageUrl}
+                  badgeText={badgeText}
+                  rating={rating ?? undefined}
+                  ratingLabel={ratingLabel ?? undefined}
+                  reviewCount={reviewCount ?? undefined}
+                  meta={meta ?? undefined}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

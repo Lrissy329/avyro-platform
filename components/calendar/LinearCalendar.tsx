@@ -8,7 +8,6 @@ import {
 import type {
   CSSProperties,
   FocusEvent as ReactFocusEvent,
-  JSX,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
@@ -24,12 +23,13 @@ import type {
 import {
   addDays,
   diffInDays,
-  formatISODate,
+  formatLocalDate,
   rangeToDates,
   startOfDay,
   formatCurrency,
   formatRangeSummary,
 } from "@/lib/dateUtils";
+import { getChannelMeta } from "@/lib/calendarChannel";
 
 export type { LinearCalendarEvent, LinearCalendarSource } from "@/lib/calendarTypes";
 
@@ -85,36 +85,6 @@ const ROW_HEIGHT = 44; // px, height of each booking lane (was 32)
 const ROW_GAP_PX = 8; // vertical gap between lanes
 const HEADER_HEIGHT = 80; // px, matches day header height
 const DAY_MIN_WIDTH = 72; // px, min width per day column
-
-const channelIconForSource: Record<LinearCalendarSource, JSX.Element | null> = {
-  booking: null,
-  manual: null,
-  airbnb: (
-    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#4B5563] text-[9px] font-semibold text-white">
-      a
-    </span>
-  ),
-  vrbo: (
-    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#4B5563] text-[9px] font-semibold text-white">
-      v
-    </span>
-  ),
-  bookingcom: (
-    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#4B5563] text-[9px] font-semibold text-white">
-      b
-    </span>
-  ),
-  expedia: (
-    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#4B5563] text-[9px] font-semibold text-white">
-      e
-    </span>
-  ),
-  other: (
-    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#4B5563] text-[9px] font-semibold text-white">
-      o
-    </span>
-  ),
-};
 
 // Helper: convert event.end (checkout / exclusive) → last stayed night (inclusive)
 const getDisplayEnd = (event: LinearCalendarEvent): Date => {
@@ -174,7 +144,7 @@ export function LinearCalendar({
   onRequestRangeShift,
 }: LinearCalendarProps) {
   const today = useMemo(() => startOfDay(new Date()), []);
-  const todayIso = formatISODate(today);
+  const todayIso = formatLocalDate(today);
 
   const totalDays = Math.max(1, diffInDays(endDate, startDate) + 1);
   const rangeEnd = useMemo(
@@ -222,7 +192,7 @@ export function LinearCalendar({
       const listingMap = (map[event.listingId] ||= {});
       const displayEnd = getDisplayEnd(event);
       rangeToDates(event.start, displayEnd).forEach((date) => {
-        const iso = formatISODate(date);
+        const iso = formatLocalDate(date);
         if (!listingMap[iso]) listingMap[iso] = [];
         listingMap[iso].push(event);
       });
@@ -280,7 +250,7 @@ export function LinearCalendar({
   const canSelectDate = useCallback(
     (listingId: string, date: Date) => {
       if (date < today) return false;
-      const iso = formatISODate(date);
+      const iso = formatLocalDate(date);
       const listingMap = dayMapsByListing[listingId];
       return !(listingMap && listingMap[iso] && listingMap[iso].length);
     },
@@ -514,7 +484,7 @@ export function LinearCalendar({
               style={{ ...gridStyle, height: `${HEADER_HEIGHT}px` }}
             >
               {days.map((day, idx) => {
-                const iso = formatISODate(day);
+                const iso = formatLocalDate(day);
                 const isToday = iso === todayIso;
                 const weekday = day.getDay();
                 const isWeekend = weekday === 0 || weekday === 6;
@@ -604,7 +574,7 @@ export function LinearCalendar({
 
                     {/* Background day hit targets */}
                     {days.map((day, idx) => {
-                      const iso = formatISODate(day);
+                      const iso = formatLocalDate(day);
                       const rate = ratesByListingDate?.[listing.id]?.[iso];
                       const currencySymbol =
                         rate?.currency === "USD"
@@ -742,7 +712,7 @@ export function LinearCalendar({
                         bar.event.start,
                         displayEnd
                       ).some((date) => {
-                        const iso = formatISODate(date);
+                        const iso = formatLocalDate(date);
                         const entriesForDay =
                           dayMapsByListing[bar.event.listingId]?.[iso] ?? [];
                         return entriesForDay.some(
@@ -754,6 +724,8 @@ export function LinearCalendar({
                       const isAwaitingPayment = status === "awaiting_payment";
                       const isApproved = status === "approved";
                       const isPaid = status === "paid";
+                      const isConfirmed = status === "confirmed";
+                      const isPaymentFailed = status === "payment_failed";
                       const isDeclined = status === "declined";
                       const isCancelled = status === "cancelled";
                       const isBlock = bar.event.meta?.kind === "block";
@@ -768,25 +740,23 @@ export function LinearCalendar({
                         "manual",
                       ].includes(bar.event.source);
 
+                      const channelMeta = getChannelMeta(bar.event.source, { isBlock });
+
                       const barClassName = clsx(
-                        "timeline-bar",
-                        "h-8 rounded-full flex items-center px-3 text-[11px] font-medium shadow-md overflow-hidden whitespace-nowrap",
+                        "timeline-bar relative flex h-9 items-center rounded-lg px-3 pr-7 text-[11px] font-medium shadow-sm overflow-hidden whitespace-nowrap",
                         extendsBefore && "rounded-l-none",
                         extendsAfter && "rounded-r-none",
-                        !isBlock &&
-                          !isCancelled &&
-                          !isDeclined &&
-                          "bg-[#0B0D10] text-white",
-                        isAwaitingPayment &&
-                          "bg-[#0B0D10]/10 text-[#4B5563] ring-2 ring-[#0B0D10]/10",
-                        isApproved && "bg-[#14FF62]/20 text-[#0B0D10]",
-                        isPaid && "bg-[#14FF62] text-[#0B0D10]",
+                        channelMeta.bgClass,
+                        channelMeta.textClass,
+                        isAwaitingPayment && "ring-1 ring-slate-300/70",
+                        isApproved && "ring-1 ring-emerald-300/70",
+                        (isPaid || isConfirmed) && "ring-1 ring-emerald-400/80",
+                        isPaymentFailed && "bg-rose-50 text-rose-700 ring-1 ring-rose-300/80",
                         isDeclined && "bg-slate-200 text-slate-500 line-through",
                         isCancelled && "bg-slate-100 text-slate-400 line-through",
-                        isManualBlock && "border border-[#0B0D10]/10",
-                        isExternalBlock &&
-                          "bg-[#0B0D10]/5 text-[#4B5563] border border-[#0B0D10]/10",
-                        hasConflict && !isCancelled && !isDeclined && "ring-2 ring-[#E5484D]"
+                        isManualBlock && "border border-slate-200",
+                        isExternalBlock && "border border-slate-200",
+                        hasConflict && !isCancelled && !isDeclined && "ring-2 ring-rose-500/80"
                       );
 
                       const barStyle: CSSProperties = {
@@ -823,32 +793,44 @@ export function LinearCalendar({
                         >
                           <span className="truncate">{bar.event.label}</span>
                           {isAwaitingPayment && (
-                            <span className="ml-2 rounded-full bg-[#0B0D10]/10 px-2 py-[1px] text-[9px] uppercase text-[#4B5563]">
+                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-600">
                               Awaiting payment
                             </span>
                           )}
                           {isApproved && (
-                            <span className="ml-2 rounded-full bg-[#14FF62]/20 px-2 py-[1px] text-[9px] uppercase text-[#0B0D10]">
+                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-700">
                               Approved
                             </span>
                           )}
-                          {isPaid && (
-                            <span className="ml-2 rounded-full bg-[#14FF62] px-2 py-[1px] text-[9px] uppercase text-[#0B0D10]">
-                              Paid
+                          {(isPaid || isConfirmed) && (
+                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-700">
+                              Confirmed
+                            </span>
+                          )}
+                          {isPaymentFailed && (
+                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-rose-600">
+                              Payment failed
                             </span>
                           )}
                           {isDeclined && (
-                            <span className="ml-2 rounded-full bg-slate-300 px-2 py-[1px] text-[9px] uppercase text-slate-700">
+                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-600">
                               Declined
                             </span>
                           )}
                           {isCancelled && (
-                            <span className="ml-2 rounded-full bg-slate-200 px-2 py-[1px] text-[9px] uppercase text-slate-600">
+                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-600">
                               Cancelled
                             </span>
                           )}
-                          <span className="ml-2 flex items-center">
-                            {channelIconForSource[bar.event.source]}
+
+                          <span className="absolute right-1 top-1">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 ring-1 ring-black/10">
+                              <img
+                                src={channelMeta.badgeIcon}
+                                alt={channelMeta.label}
+                                className="h-4 w-4"
+                              />
+                            </span>
                           </span>
                         </div>
                       );

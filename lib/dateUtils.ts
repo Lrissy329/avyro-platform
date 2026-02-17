@@ -4,6 +4,14 @@ export const startOfDay = (date: Date): Date => {
   return next;
 };
 
+// Local YYYY-MM-DD (avoids UTC/DST shifts when rendering calendar days)
+export const formatLocalDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const getTimeZoneParts = (date: Date, timeZone: string) => {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -104,10 +112,12 @@ export const rangeToDates = (start: Date, end: Date): Date[] => {
 export const formatCurrency = (value?: number | null, currency?: string | null): string | null => {
   if (value === undefined || value === null) return null;
   try {
+    const isWhole = Math.round(value * 100) % 100 === 0;
     return new Intl.NumberFormat(undefined, {
       style: "currency",
       currency: currency || "GBP",
-      maximumFractionDigits: 0,
+      minimumFractionDigits: isWhole ? 0 : 2,
+      maximumFractionDigits: isWhole ? 0 : 2,
     }).format(value);
   } catch {
     return `${currency ?? "GBP"} ${value}`;

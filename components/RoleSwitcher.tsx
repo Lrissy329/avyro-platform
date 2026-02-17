@@ -26,13 +26,13 @@ export function RoleSwitcher({ tone = "light", className = "" }: RoleSwitcherPro
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("is_host, is_guest")
+        .select("role_host, role_guest")
         .eq("id", user.id)
         .single();
 
       if (profile) {
-        setIsHost(Boolean(profile.is_host));
-        setIsGuest(Boolean(profile.is_guest));
+        setIsHost(Boolean(profile.role_host));
+        setIsGuest(Boolean(profile.role_guest));
       }
 
       setLoading(false);
@@ -58,8 +58,8 @@ export function RoleSwitcher({ tone = "light", className = "" }: RoleSwitcherPro
 
     const updates =
       newRole === "host"
-        ? { is_host: true }
-        : { is_guest: true };
+        ? { role_host: true }
+        : { role_guest: true };
 
     const { error } = await supabase.from("profiles").update(updates).eq("id", user.id);
 

@@ -180,17 +180,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         const fullPayload: Record<string, any> = {
-          status: "paid",
+          status: "confirmed",
           payout_status: "awaiting_payout",
           stripe_checkout_session_id: session.id,
           stripe_payment_intent_id: paymentIntentId,
+          stripe_status: "succeeded",
           amount,
           currency,
         };
 
         const fallbackPayload: Record<string, any> = {
-          status: "paid",
+          status: "confirmed",
           payout_status: "awaiting_payout",
+          stripe_status: "succeeded",
         };
 
         const applyUpdate = async (payload: Record<string, any>) => {
@@ -205,7 +207,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               .eq("listing_id", listingId)
               .eq("guest_id", guestId)
               .eq("host_id", hostId)
-              .eq("status", "pending")
+              .in("status", ["pending", "awaiting_payment"])
               .select("id");
           }
 
@@ -218,7 +220,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           console.warn(
             "[stripe-webhook] checkout.session.completed missing booking identifiers; no update performed."
           );
-          break;
+        }
+
+        if (updateResult && (!updateResult.data || updateResult.data.length === 0)) {
+          updateResult = await supabaseAdmin
+            .from("bookings")
+            .update(fullPayload)
+            .eq("stripe_checkout_session_id", session.id)
+            .select("id");
         }
 
         if (updateResult?.error) {
@@ -231,6 +240,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         if (updateResult?.error) {
           console.error("[stripe-webhook] failed to update booking:", updateResult.error);
+          const paidFallback = {
+            ...fallbackPayload,
+            status: "paid",
+          };
+          await supabaseAdmin
+            .from("bookings")
+            .update(paidFallback)
+            .eq("stripe_checkout_session_id", session.id);
         } else if (updateResult && (!updateResult.data || updateResult.data.length === 0)) {
           console.warn("[stripe-webhook] booking update matched no rows. Ensure booking exists.");
         }
@@ -240,6 +257,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       case "payment_intent.succeeded": {
         // Checkout handler above already manages booking state, but you could mirror status here if needed.
+        break;
+      }
+
+      case "payment_intent.payment_failed": {
+        const paymentIntent = event.data.object as any;
+        const paymentIntentId = paymentIntent?.id as string | undefined;
+        if (!paymentIntentId) break;
+
+        const { error } = await supabaseAdmin
+          .from("bookings")
+          .update({
+            status: "payment_failed",
+            stripe_status: paymentIntent?.status ?? "failed",
+          })
+          .eq("stripe_payment_intent_id", paymentIntentId);
+
+        if (error) {
+          console.error("[stripe-webhook] failed to mark payment_failed:", error);
+          await supabaseAdmin
+            .from("bookings")
+            .update({
+              status: "awaiting_payment",
+              stripe_status: paymentIntent?.status ?? "failed",
+            })
+            .eq("stripe_payment_intent_id", paymentIntentId);
+        }
         break;
       }
 

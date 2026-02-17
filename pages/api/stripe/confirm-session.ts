@@ -60,10 +60,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       (session.currency ?? (session as any).currency)?.toString().toUpperCase() ?? "GBP";
 
     const payload: Record<string, any> = {
-      status: "paid",
+      status: "confirmed",
       payout_status: "awaiting_payout",
       stripe_checkout_session_id: session.id,
       stripe_payment_intent_id: paymentIntentId,
+      stripe_status: "succeeded",
     };
     if (amountMinor && amountMinor > 0) {
       payload.price_total = amountMinor / 100;
@@ -80,7 +81,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .eq("listing_id", listingId)
           .eq("host_id", hostId)
           .eq("guest_id", guestId)
-          .eq("status", "pending")
+          .in("status", ["pending", "awaiting_payment"])
           .select("id");
       }
       return null;
@@ -88,9 +89,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const result = await applyUpdate();
     if (!result) {
-      return res.status(409).json({ error: "Unable to match booking for this session." });
+      const fallback = await supabaseAdmin
+        .from("bookings")
+        .update(payload)
+        .eq("stripe_checkout_session_id", session.id)
+        .select("id");
+      if (fallback?.error) {
+        return res.status(409).json({ error: "Unable to match booking for this session." });
+      }
+      return res.status(200).json({ success: true, bookingId: fallback.data?.[0]?.id ?? bookingId });
     }
     if (result.error) {
+      const paidFallback = { ...payload, status: "paid" };
+      await supabaseAdmin
+        .from("bookings")
+        .update(paidFallback)
+        .eq("stripe_checkout_session_id", session.id);
       return res.status(500).json({ error: result.error.message });
     }
 

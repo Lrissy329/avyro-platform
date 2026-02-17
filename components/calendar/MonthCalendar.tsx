@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import clsx from "clsx";
 
 import type { LinearCalendarListing } from "@/components/calendar/LinearCalendar";
-import { addDays, formatISODate, startOfDay, startOfWeek } from "@/lib/dateUtils";
+import { addDays, formatLocalDate, startOfDay, startOfWeek } from "@/lib/dateUtils";
 
 export type MonthDayState = "booked" | "manual" | "external";
 
@@ -24,7 +24,7 @@ export function MonthCalendar({
   hourlyIndicators,
   onDayClick,
 }: MonthCalendarProps) {
-  const todayIso = formatISODate(startOfDay(new Date()));
+  const todayIso = formatLocalDate(startOfDay(new Date()));
   const gridStart = useMemo(() => startOfWeek(monthStart), [monthStart]);
   const days = useMemo(
     () => Array.from({ length: 42 }, (_, idx) => addDays(gridStart, idx)),
@@ -88,7 +88,7 @@ export function MonthCalendar({
                 }}
               >
                 {days.map((day) => {
-                  const dayIso = formatISODate(day);
+                  const dayIso = formatLocalDate(day);
                   const isInMonth = day.getMonth() === monthStart.getMonth();
                   const state = dayStates?.[listing.id]?.[dayIso];
                   const hasHourly = hourlyIndicators?.[listing.id]?.[dayIso];

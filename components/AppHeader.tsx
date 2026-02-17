@@ -6,8 +6,8 @@ import { supabase } from "@/lib/supabaseClient";
 type Profile = {
   full_name: string | null;
   avatar_url: string | null;
-  is_host: boolean;
-  is_guest: boolean;
+  role_host: boolean;
+  role_guest: boolean;
 };
 
 type AppHeaderProps = {
@@ -50,7 +50,7 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
 
       const { data } = await supabase
         .from("profiles")
-        .select("full_name, avatar_url, is_host, is_guest")
+        .select("full_name, avatar_url, role_host, role_guest")
         .eq("id", user.id)
         .single();
 
@@ -64,14 +64,14 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
           ? {
               full_name: data.full_name ?? user.email ?? null,
               avatar_url: data.avatar_url ?? fallbackAvatar,
-              is_host: Boolean(data.is_host),
-              is_guest: Boolean(data.is_guest),
+              role_host: Boolean(data.role_host),
+              role_guest: Boolean(data.role_guest),
             }
           : {
               full_name: user.email ?? null,
               avatar_url: fallbackAvatar,
-              is_host: false,
-              is_guest: false,
+              role_host: false,
+              role_guest: false,
             }
       );
       setLoadingProfile(false);
@@ -137,7 +137,7 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
           <button
             type="button"
             onClick={() =>
-              router.push(profile?.is_host ? "/host/dashboard" : "/host/create-listing")
+              router.push(profile?.role_host ? "/host/dashboard" : "/host/create-listing")
             }
             className="hidden rounded-full px-3 py-2 text-sm font-medium text-gray-900 transition hover:bg-gray-100 md:block"
           >
@@ -198,14 +198,14 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                     {profile.full_name ?? "Your account"}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {profile.is_host ? "Host" : profile.is_guest ? "Guest" : "Member"}
+                    {profile.role_host ? "Host" : profile.role_guest ? "Guest" : "Member"}
                   </p>
                 </div>
                 <nav className="px-2 py-2 text-sm text-gray-700">
                   <ButtonMenuItem
                     label="Dashboard"
                     onClick={() => {
-                      router.push(profile.is_host ? "/host/dashboard" : "/guest/dashboard");
+                      router.push(profile.role_host ? "/host/dashboard" : "/guest/dashboard");
                       setMenuOpen(false);
                     }}
                   />
@@ -213,7 +213,7 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                     label="Messages"
                     onClick={() => {
                       router.push(
-                        profile.is_host ? "/host/dashboard#messages" : "/guest/dashboard"
+                        profile.role_host ? "/host/dashboard#messages" : "/guest/dashboard"
                       );
                       setMenuOpen(false);
                     }}
@@ -226,7 +226,7 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                         : undefined
                     }
                     onClick={() => {
-                      router.push(profile.is_host ? "/host/dashboard" : "/guest/dashboard");
+                      router.push(profile.role_host ? "/host/dashboard" : "/guest/dashboard");
                       setMenuOpen(false);
                     }}
                   />
@@ -237,7 +237,7 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                       setMenuOpen(false);
                     }}
                   />
-                  {profile.is_host && (
+                  {profile.role_host && (
                     <ButtonMenuItem
                       label="Create listing"
                       onClick={() => {

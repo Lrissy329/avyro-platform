@@ -235,10 +235,12 @@ export default function BookingSuccessPage() {
         : null;
 
     const bookingStatusLabel =
-      booking.status === "paid"
+      booking.status === "paid" || booking.status === "confirmed"
         ? "Confirmed"
         : booking.status === "awaiting_payment"
         ? "Awaiting payment"
+        : booking.status === "payment_failed"
+        ? "Payment failed"
         : booking.status ?? "pending";
 
     const payoutStatusLabel =
@@ -285,10 +287,14 @@ export default function BookingSuccessPage() {
             <dd className="text-right">{payoutStatusLabel}</dd>
           </div>
         </dl>
-        {booking.status === "paid" ? (
+        {booking.status === "paid" || booking.status === "confirmed" ? (
           <p className="mt-4 text-sm text-[#0B0D10] bg-[#14FF62]/15 border border-[#14FF62]/40 rounded-xl px-3 py-2">
             You’re all set—your reservation is confirmed and the host has been notified. You can
             manage the stay or message your host from your dashboard.
+          </p>
+        ) : booking.status === "payment_failed" ? (
+          <p className="mt-4 text-sm text-[#E5484D] bg-[#E5484D]/10 border border-[#E5484D]/30 rounded-xl px-3 py-2">
+            Your payment didn’t go through. Please try again from your dashboard.
           </p>
         ) : (
           <p className="mt-4 text-sm text-[#4B5563] bg-[#0B0D10]/5 border border-[#0B0D10]/10 rounded-xl px-3 py-2">

@@ -32,7 +32,7 @@ import {
   startOfMonth,
   daysInMonth,
   diffInDays,
-  formatISODate,
+  formatLocalDate,
   rangeToDates,
   formatRangeSummary,
 } from "@/lib/dateUtils";
@@ -422,7 +422,9 @@ export function HostCalendar({
         const rawStatus = row.status as string | undefined;
         const status = rawStatus as BookingStatus | undefined;
         const source: CalendarEntry["source"] =
-          rawStatus === "awaiting_payment" || rawStatus === "pending"
+          rawStatus === "awaiting_payment" ||
+          rawStatus === "pending" ||
+          rawStatus === "payment_failed"
             ? "booking_pending"
             : "booking_accepted";
         const listingLabel = listingNameMap.get(row.listing_id) ?? listingDisplayName;
@@ -503,8 +505,8 @@ export function HostCalendar({
     const listingIds = timelineListingIds.length ? timelineListingIds : [listingId];
     if (!listingIds.length) return;
 
-    const startIso = formatISODate(timelineStartDate);
-    const endIso = formatISODate(addDays(timelineStartDate, timelineDays - 1));
+    const startIso = formatLocalDate(timelineStartDate);
+    const endIso = formatLocalDate(addDays(timelineStartDate, timelineDays - 1));
 
     const { data, error } = await supabase
       .from("nightly_rates")
@@ -667,7 +669,7 @@ export function HostCalendar({
         dates.map(async (date) => {
           const { error } = await supabase.from("nightly_rates").upsert({
             listing_id: targetListingId,
-            date: formatISODate(date),
+            date: formatLocalDate(date),
             price,
             currency,
           });
@@ -791,8 +793,8 @@ export function HostCalendar({
           channel,
           kind,
           status,
-          startDate: formatISODate(entry.start),
-          endDate: formatISODate(addDays(entry.end, 1)),
+          startDate: formatLocalDate(entry.start),
+          endDate: formatLocalDate(addDays(entry.end, 1)),
         };
       })
       .filter((event) => visibleChannels.includes(event.channel));
@@ -963,8 +965,8 @@ export function HostCalendar({
       } else {
         await supabase.from("listing_calendar_blocks").insert({
           listing_id: targetListingId,
-          start_date: formatISODate(payload.start),
-          end_date: formatISODate(payload.end),
+          start_date: formatLocalDate(payload.start),
+          end_date: formatLocalDate(payload.end),
           label: payload.label,
           source,
           color: payload.color,

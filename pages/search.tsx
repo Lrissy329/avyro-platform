@@ -2,7 +2,7 @@ import { useRouter } from "next/router";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 
-import MapListingCard from "@/components/MapListingCard";
+import MapListingCard from "@/components/MapListingCardV2";
 import SearchBar from "@/components/SearchBar";
 import { supabase } from "@/lib/supabaseClient";
 

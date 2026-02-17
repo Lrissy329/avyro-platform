@@ -17,6 +17,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
 
   try {
+    const resolveOrigin = () => {
+      const envOrigin = process.env.NEXT_PUBLIC_SITE_URL;
+      if (envOrigin) return envOrigin.replace(/\/$/, "");
+      const forwardedProto = (req.headers["x-forwarded-proto"] as string) ?? "https";
+      const forwardedHost = (req.headers["x-forwarded-host"] as string) ?? req.headers.host;
+      if (forwardedHost) return `${forwardedProto}://${forwardedHost}`;
+      if (req.headers.origin) return req.headers.origin;
+      return "http://localhost:3000";
+    };
+
     const {
       bookingId,
       listingId,
@@ -58,12 +68,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let resolvedCheckOutTime = checkOutTime;
     let resolvedStayType = stayType;
     let resolvedChannel = channel;
+    let resolvedGuestTotalPence: number | null = null;
 
     const ensureBookingDetails = async () => {
       const { data, error } = await supabaseAdmin
         .from("bookings")
         .select(
-          "id, listing_id, host_id, guest_id, check_in_time, check_out_time, stay_type, channel, price_total, currency"
+          "id, listing_id, host_id, guest_id, check_in_time, check_out_time, stay_type, channel, price_total, currency, guest_total_pence"
         )
         .eq("id", bookingId)
         .single();
@@ -80,6 +91,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       resolvedCheckOutTime = resolvedCheckOutTime ?? (data.check_out_time as string | undefined);
       resolvedStayType = resolvedStayType ?? ((data.stay_type as any) || "nightly");
       resolvedChannel = resolvedChannel ?? ((data.channel as any) || "direct");
+      resolvedGuestTotalPence =
+        resolvedGuestTotalPence ??
+        (typeof data.guest_total_pence === "number" ? data.guest_total_pence : null);
 
       if (!resolvedNights || resolvedNights <= 0) {
         if (resolvedCheckInTime && resolvedCheckOutTime) {
@@ -101,6 +115,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           resolvedPricePerUnit = Math.max(
             1,
             Math.round(Number(data.price_total) / resolvedNights)
+          );
+        } else if (data.guest_total_pence && resolvedNights && resolvedNights > 0) {
+          resolvedPricePerUnit = Math.max(
+            1,
+            Math.round(Number(data.guest_total_pence) / 100 / resolvedNights)
           );
         } else if (data.listing_id) {
           const { data: listingRow, error: listingErr } = await supabaseAdmin
@@ -164,11 +183,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const isHourlyStay = resolvedStayType === "day_use" || resolvedStayType === "split_rest";
     const unitLabel = isHourlyStay ? "hour" : "night";
     const baseMinor = Math.round(resolvedPricePerUnit * resolvedNights * 100);
-    const pricing = computePricingFromMinor(baseMinor);
-    const amount = pricing.totalMinor;
-    const applicationFeeAmount = pricing.serviceFeeMinor;
+    let amount = resolvedGuestTotalPence ?? baseMinor;
+    let applicationFeeAmount = 0;
 
-    const origin = req.headers.origin ?? process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+    if (!resolvedGuestTotalPence && resolvedPricePerUnit && resolvedNights) {
+      const pricing = computePricingFromMinor(baseMinor);
+      amount = pricing.totalMinor;
+      applicationFeeAmount = pricing.serviceFeeMinor;
+    }
+
+    const origin = resolveOrigin();
 
     const transferGroup = `booking_${bookingId}`;
 
@@ -221,6 +245,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         channel: resolvedChannel,
       },
     });
+
+    await supabaseAdmin
+      .from("bookings")
+      .update({
+        stripe_checkout_session_id: session.id,
+        stripe_payment_intent_id:
+          typeof session.payment_intent === "string" ? session.payment_intent : null,
+        stripe_status: session.payment_status ?? "unpaid",
+      })
+      .eq("id", bookingId);
 
     return res.status(200).json({ id: session.id, url: session.url });
   } catch (e: any) {

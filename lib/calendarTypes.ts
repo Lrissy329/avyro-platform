@@ -27,7 +27,9 @@ export interface DateRange {
 export type BookingStatus =
   | "awaiting_payment"
   | "approved"
+  | "confirmed"
   | "paid"
+  | "payment_failed"
   | "declined"
   | "cancelled";
 

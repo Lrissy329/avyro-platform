@@ -76,6 +76,25 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
     });
   }, []);
 
+  const markConversationRead = useCallback(
+    async (conversationId: string | null) => {
+      if (!conversationId || !userId) return;
+      try {
+        await supabase.from("message_reads").upsert(
+          {
+            conversation_id: conversationId,
+            user_id: userId,
+            last_read_at: new Date().toISOString(),
+          },
+          { onConflict: "conversation_id,user_id" }
+        );
+      } catch (err) {
+        console.warn("[messages] message_reads not available", err);
+      }
+    },
+    [userId]
+  );
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const id = data.session?.user?.id ?? null;
@@ -315,6 +334,7 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
     }
 
     loadMessagesForConversation(selectedConversation);
+    markConversationRead(selectedConversation);
 
     const channel = supabase
       .channel(`messages:${selectedConversation}`)
@@ -334,6 +354,7 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
             return [...prev, newMessage];
           });
           cacheLastMessage(selectedConversation, newMessage);
+          markConversationRead(selectedConversation);
           setConversations((prev) => {
             const next = prev.map((conversation) =>
               conversation.id === selectedConversation
@@ -354,7 +375,7 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedConversation, loadMessagesForConversation, cacheLastMessage]);
+  }, [selectedConversation, loadMessagesForConversation, cacheLastMessage, markConversationRead]);
 
   const partnerLabel = (conversation: Conversation) => {
     if (!userId) return "";
@@ -388,6 +409,11 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
       if (inserted) {
         setMessages((prev) => [...prev, inserted]);
         cacheLastMessage(selectedConversation, inserted);
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: inserted.created_at })
+          .eq("id", selectedConversation);
+        await markConversationRead(selectedConversation);
         setConversations((prev) => {
           const next = prev.map((conversation) =>
             conversation.id === selectedConversation

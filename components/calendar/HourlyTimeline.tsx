@@ -12,6 +12,7 @@ import type {
 import clsx from "clsx";
 
 import type { LinearCalendarEvent } from "@/lib/calendarTypes";
+import { getChannelMeta } from "@/lib/calendarChannel";
 import { addDays, startOfDayInTimeZone } from "@/lib/dateUtils";
 import type { LinearCalendarListing } from "@/components/calendar/LinearCalendar";
 
@@ -52,7 +53,8 @@ export function HourlyTimeline({
   selection,
   onSelectRange,
   onClearSelection,
-  onBookingClick,  timezone = "Europe/London",
+  onBookingClick,
+  timezone = "Europe/London",
 }: HourlyTimelineProps) {
   const dayStart = useMemo(() => startOfDayInTimeZone(date, timezone), [date, timezone]);
   const dayEnd = useMemo(() => addDays(dayStart, 1), [dayStart]);
@@ -276,15 +278,16 @@ export function HourlyTimeline({
                       );
                       if (endSlot <= startSlot) return null;
                       const isBlock = event.meta?.kind === "block";
-                      const background = isBlock ? "#4B5563" : "#0B0D10";
-                      const textColor = isBlock ? "#ffffff" : "#ffffff";
+                      const channelMeta = getChannelMeta(event.source, { isBlock });
 
                       return (
                         <div
                           key={event.id}
                           className={clsx(
-                            "flex items-center rounded-full px-3 text-[11px] font-medium shadow-sm",
-                            isBlock && "border border-[#0B0D10]/10"
+                            "relative flex h-9 items-center rounded-lg px-3 pr-7 text-[11px] font-medium shadow-sm",
+                            channelMeta.bgClass,
+                            channelMeta.textClass,
+                            isBlock && "border border-slate-200"
                           )}
                           style={{
                             gridColumnStart: startSlot + 1,
@@ -292,12 +295,19 @@ export function HourlyTimeline({
                             gridRowStart: 1,
                             gridRowEnd: 2,
                             zIndex: 4,
-                            backgroundColor: background,
-                            color: textColor,
                           }}
                           onClick={() => onBookingClick?.(event)}
                         >
                           <span className="truncate">{event.label}</span>
+                          <span className="absolute right-1 top-1">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 ring-1 ring-black/10">
+                              <img
+                                src={channelMeta.badgeIcon}
+                                alt={channelMeta.label}
+                                className="h-4 w-4"
+                              />
+                            </span>
+                          </span>
                         </div>
                       );
                     })}

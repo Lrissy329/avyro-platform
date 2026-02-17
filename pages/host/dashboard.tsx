@@ -5,6 +5,7 @@ import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { supabase } from "@/lib/supabaseClient";
+import { ensureProfile } from "@/lib/ensureProfile";
 import {
   LineChart,
   Line,
@@ -49,6 +50,8 @@ export default function HostDashboardPage() {
         setListingsLoading(false);
         return;
       }
+
+      await ensureProfile();
 
       const { data, error } = await supabase
         .from("listings")

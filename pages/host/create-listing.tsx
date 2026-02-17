@@ -20,6 +20,19 @@ type PriceOverrideInput = {
   price: string;
 };
 
+type HostQuote = {
+  currency: "GBP";
+  host_net_nightly_pence: number;
+  guest_unit_price_pence: number;
+  platform_fee_est_pence: number;
+  stripe_fee_est_pence: number;
+  platform_margin_est_pence: number;
+  platform_fee_bps: number;
+  stripe_var_bps: number;
+  stripe_fixed_pence: number;
+  pricing_version: "all_in_v1";
+};
+
 const PLACE_TYPES = [
   { value: "house", label: "House", icon: "🏠" },
   { value: "flat", label: "Flat/apartment", icon: "🏢" },
@@ -93,6 +106,16 @@ const BOOKING_UNIT_COPY: Record<
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 const PRICE_FIELDS = new Set(["price_per_night", "price_per_hour", "price_per_week", "price_per_month"]);
+const NIGHTLY_RATE_MIN = 20;
+const NIGHTLY_RATE_MAX = 1000;
+
+const formatGBPFromPence = (pence: number) =>
+  new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(pence / 100);
 
 type GeoSuggestion = {
   id: string;
@@ -129,6 +152,9 @@ export default function CreateListing() {
     longitude: -0.1278,
     amenities: [] as string[],
   });
+  const [hostQuote, setHostQuote] = useState<HostQuote | null>(null);
+  const [hostQuoteLoading, setHostQuoteLoading] = useState(false);
+  const [hostQuoteError, setHostQuoteError] = useState<string | null>(null);
 
   const rentalTypeConfig = useMemo(() => {
     return (
@@ -139,6 +165,59 @@ export default function CreateListing() {
 
   const bookingUnitCopy = BOOKING_UNIT_COPY[rentalTypeConfig.bookingUnit];
   const isHourlyBooking = rentalTypeConfig.bookingUnit === "hourly";
+
+  useEffect(() => {
+    if (isHourlyBooking) {
+      setHostQuote(null);
+      setHostQuoteError(null);
+      setHostQuoteLoading(false);
+      return;
+    }
+
+    const raw = formData.price_per_night.trim();
+    const nightlyValue = Number(raw);
+    if (!raw || !Number.isFinite(nightlyValue) || nightlyValue <= 0 || !Number.isInteger(nightlyValue)) {
+      setHostQuote(null);
+      setHostQuoteError(null);
+      setHostQuoteLoading(false);
+      return;
+    }
+
+    const hostNetNightlyPence = nightlyValue * 100;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setHostQuoteLoading(true);
+      setHostQuoteError(null);
+      try {
+        const resp = await fetch("/api/pricing/host-quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hostNetNightlyPence }),
+        });
+        const payload = await resp.json();
+        if (!resp.ok) {
+          throw new Error(payload?.error ?? "Failed to fetch pricing quote.");
+        }
+        if (!cancelled) {
+          setHostQuote(payload);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setHostQuote(null);
+          setHostQuoteError(err?.message ?? "Failed to fetch pricing quote.");
+        }
+      } finally {
+        if (!cancelled) {
+          setHostQuoteLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [formData.price_per_night, isHourlyBooking]);
 
   useEffect(() => {
     const nextBookingUnit = rentalTypeConfig.bookingUnit;
@@ -413,6 +492,8 @@ const handleCardSelect = (name: string, value: string) => {
       newErrors[rateField] = isHourly
         ? "Enter a valid hourly rate."
         : "Enter a valid nightly rate.";
+    } else if (!Number.isInteger(rateValue)) {
+      newErrors[rateField] = "Use whole pounds (no decimals).";
     }
 
     if (isHourly) {
@@ -447,6 +528,10 @@ const handleCardSelect = (name: string, value: string) => {
         newErrors[field] = "Enter a positive amount.";
         return null;
       }
+      if (!Number.isInteger(num)) {
+        newErrors[field] = "Use whole pounds (no decimals).";
+        return null;
+      }
       return num;
     };
 
@@ -465,6 +550,10 @@ const handleCardSelect = (name: string, value: string) => {
         const priceValue = Number(entry.price);
         if (isNaN(priceValue) || priceValue <= 0) {
           overridesError = "Custom pricing must use positive numbers.";
+          return null;
+        }
+        if (!Number.isInteger(priceValue)) {
+          overridesError = "Custom pricing must use whole pounds (no decimals).";
           return null;
         }
         return {
@@ -1112,13 +1201,15 @@ const handleCardSelect = (name: string, value: string) => {
                 </label>
                 <input
                   id={isHourlyBooking ? "price_per_hour" : "price_per_night"}
-                  type="text"
+                  type="number"
                   name={isHourlyBooking ? "price_per_hour" : "price_per_night"}
                   value={isHourlyBooking ? formData.price_per_hour : formData.price_per_night}
                   onChange={handleChange}
                   className="border border-black p-3 rounded w-full"
                   placeholder="e.g. 100"
-                  inputMode="decimal"
+                  inputMode="numeric"
+                  min="1"
+                  step="1"
                   autoComplete="off"
                 />
                 {(isHourlyBooking ? errors.price_per_hour : errors.price_per_night) && (
@@ -1127,6 +1218,68 @@ const handleCardSelect = (name: string, value: string) => {
                   </p>
                 )}
               </div>
+              {!isHourlyBooking && (
+                <div className="mb-4">
+                  <label className="block text-xs font-semibold text-gray-600 mb-2">
+                    Adjust nightly rate
+                  </label>
+                  <input
+                    type="range"
+                    min={NIGHTLY_RATE_MIN}
+                    max={NIGHTLY_RATE_MAX}
+                    step="1"
+                    value={(() => {
+                      const numeric = Number(formData.price_per_night);
+                      if (!Number.isFinite(numeric) || numeric <= 0) return NIGHTLY_RATE_MIN;
+                      return Math.min(NIGHTLY_RATE_MAX, Math.max(NIGHTLY_RATE_MIN, Math.round(numeric)));
+                    })()}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        price_per_night: String(e.target.value),
+                      }))
+                    }
+                    className="w-full accent-black"
+                  />
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-gray-500">
+                    <span>£{NIGHTLY_RATE_MIN}</span>
+                    <span>£{NIGHTLY_RATE_MAX}</span>
+                  </div>
+                </div>
+              )}
+              {!isHourlyBooking && (
+                <div className="mb-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-gray-700">Guest pays (rounded)</p>
+                    <p className="text-lg font-semibold text-gray-900">
+                      {hostQuote ? formatGBPFromPence(hostQuote.guest_unit_price_pence) : "—"}
+                    </p>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">Includes all fees.</p>
+                  {hostQuote && (
+                    <div className="mt-3 space-y-1 text-xs text-gray-600">
+                      <div className="flex items-center justify-between">
+                        <span>Your target (per night)</span>
+                        <span>{formatGBPFromPence(hostQuote.host_net_nightly_pence)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Stripe fee (est.)</span>
+                        <span>{formatGBPFromPence(hostQuote.stripe_fee_est_pence)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Platform fee (est.)</span>
+                        <span>{formatGBPFromPence(hostQuote.platform_fee_est_pence)}</span>
+                      </div>
+                    </div>
+                  )}
+                  {hostQuoteLoading && (
+                    <p className="mt-2 text-xs text-gray-500">Updating guest price…</p>
+                  )}
+                  {hostQuoteError && (
+                    <p className="mt-2 text-xs text-red-600">{hostQuoteError}</p>
+                  )}
+                </div>
+              )}
               {isHourlyBooking ? (
   <p className="text-sm text-gray-600">
     Hourly listings use a single rate in MVP. Weekly/monthly discounts and custom date pricing are disabled.
@@ -1140,13 +1293,15 @@ const handleCardSelect = (name: string, value: string) => {
         </label>
         <input
           id="price_per_week"
-          type="text"
+          type="number"
           name="price_per_week"
           value={formData.price_per_week}
           onChange={handleChange}
           className="border border-black p-3 rounded w-full"
           placeholder="e.g. 600"
-          inputMode="decimal"
+          inputMode="numeric"
+          min="1"
+          step="1"
           autoComplete="off"
         />
         {errors.price_per_week && (
@@ -1159,13 +1314,15 @@ const handleCardSelect = (name: string, value: string) => {
         </label>
         <input
           id="price_per_month"
-          type="text"
+          type="number"
           name="price_per_month"
           value={formData.price_per_month}
           onChange={handleChange}
           className="border border-black p-3 rounded w-full"
           placeholder="e.g. 2200"
-          inputMode="decimal"
+          inputMode="numeric"
+          min="1"
+          step="1"
           autoComplete="off"
         />
         {errors.price_per_month && (
@@ -1247,13 +1404,16 @@ const handleCardSelect = (name: string, value: string) => {
                     Price (GBP)
                   </label>
                   <input
-                    type="text"
+                    type="number"
                     value={override.price}
                     onChange={(e) =>
                       updatePriceOverride(override.id, "price", e.target.value)
                     }
                     className="w-32 rounded border border-gray-300 px-3 py-2 text-sm"
                     placeholder="e.g. 180"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
                   />
                 </div>
                 <button

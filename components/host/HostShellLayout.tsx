@@ -1,11 +1,12 @@
 // components/host/HostShellLayout.tsx
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { type ReactNode } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabaseClient";
 
 type NavKey =
   | "dashboard"
@@ -14,12 +15,20 @@ type NavKey =
   | "messages"
   | "guests"
   | "payouts"
-  | "settings";
+  | "settings"
+  | "profile";
 
 type HostShellLayoutProps = {
   title?: string;
   activeNav?: NavKey;
   children: ReactNode;
+};
+
+type ConversationRow = {
+  id: string;
+  host_id: string;
+  guest_id: string;
+  last_message_at: string | null;
 };
 
 const navItems: Array<{ key: NavKey; label: string; href: string; section: "Main" | "Finance" | "Utility" }> =
@@ -30,11 +39,92 @@ const navItems: Array<{ key: NavKey; label: string; href: string; section: "Main
     { key: "messages", label: "Messages", href: "/host/messages", section: "Main" },
     { key: "guests", label: "Guests", href: "/host/guests", section: "Main" },
     { key: "payouts", label: "Payouts", href: "/host/payouts", section: "Finance" },
+    { key: "profile", label: "Profile", href: "/host/profile", section: "Utility" },
     { key: "settings", label: "Settings", href: "/host/settings", section: "Utility" },
   ];
 
 export function HostShellLayout({ title, activeNav, children }: HostShellLayoutProps) {
   const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setUserId(data.session?.user?.id ?? null);
+    });
+  }, []);
+
+  const refreshUnread = useCallback(async () => {
+    if (!userId) return;
+    const { data: conversations, error: conversationError } = await supabase
+      .from("conversations")
+      .select("id, host_id, guest_id, last_message_at")
+      .or(`host_id.eq.${userId},guest_id.eq.${userId}`);
+
+    if (conversationError || !conversations) {
+      return;
+    }
+
+    let reads: Array<{ conversation_id: string; last_read_at: string | null }> = [];
+    try {
+      const { data: readRows, error: readError } = await supabase
+        .from("message_reads")
+        .select("conversation_id, last_read_at")
+        .eq("user_id", userId);
+      if (!readError && readRows) {
+        reads = readRows as Array<{ conversation_id: string; last_read_at: string | null }>;
+      }
+    } catch (err) {
+      console.warn("[messages] message_reads not available", err);
+    }
+
+    const readMap = reads.reduce<Record<string, number>>((acc, row) => {
+      if (row.last_read_at) {
+        acc[row.conversation_id] = new Date(row.last_read_at).getTime();
+      }
+      return acc;
+    }, {});
+
+    const unread = (conversations as ConversationRow[]).reduce((count, convo) => {
+      if (!convo.last_message_at) return count;
+      const lastMessageAt = new Date(convo.last_message_at).getTime();
+      const lastReadAt = readMap[convo.id];
+      if (!lastReadAt || lastMessageAt > lastReadAt) {
+        return count + 1;
+      }
+      return count;
+    }, 0);
+
+    setUnreadCount(unread);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    refreshUnread();
+
+    const channel = supabase
+      .channel(`host-messages-unread:${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversations" },
+        (payload) => {
+          const row = payload.new as ConversationRow | null;
+          if (!row) return;
+          if (row.host_id !== userId && row.guest_id !== userId) return;
+          refreshUnread();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "message_reads", filter: `user_id=eq.${userId}` },
+        () => refreshUnread()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId, refreshUnread]);
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -73,6 +163,11 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
                         )}
                       >
                         <span>{item.label}</span>
+                        {item.key === "messages" && unreadCount > 0 ? (
+                          <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
+                            {unreadCount}
+                          </span>
+                        ) : null}
                       </button>
                     </Link>
                   );
@@ -101,6 +196,11 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
                         )}
                       >
                         <span>{item.label}</span>
+                        {item.key === "messages" && unreadCount > 0 ? (
+                          <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
+                            {unreadCount}
+                          </span>
+                        ) : null}
                       </button>
                     </Link>
                   );
@@ -129,6 +229,11 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
                         )}
                       >
                         <span>{item.label}</span>
+                        {item.key === "messages" && unreadCount > 0 ? (
+                          <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
+                            {unreadCount}
+                          </span>
+                        ) : null}
                       </button>
                     </Link>
                   );

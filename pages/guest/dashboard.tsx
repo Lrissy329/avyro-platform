@@ -2,13 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "@/lib/supabaseClient";
+import { ensureProfile } from "@/lib/ensureProfile";
 import { ListingCard } from "@/components/ListingCard";
 import { RoleSwitcher } from "@/components/RoleSwitcher";
 import { MessagesPanel } from "@/components/MessagesPanel";
 import { AppHeader } from "@/components/AppHeader";
 import type { Listing } from "@/types/Listing";
 
-type BookingStatus = "pending" | "awaiting_payment" | "approved" | "paid" | "declined" | "cancelled";
+type BookingStatus =
+  | "pending"
+  | "awaiting_payment"
+  | "approved"
+  | "paid"
+  | "confirmed"
+  | "payment_failed"
+  | "declined"
+  | "cancelled";
 
 type GuestBooking = {
   id: string;
@@ -261,13 +270,15 @@ export default function GuestDashboard() {
         return;
       }
 
+      await ensureProfile();
+
       const { data: profile } = await supabase
         .from("profiles")
-        .select("is_guest")
+        .select("role_guest")
         .eq("id", user.id)
         .single();
 
-      if (!profile?.is_guest) {
+      if (!profile?.role_guest) {
         router.push("/host/dashboard");
         return;
       }
@@ -327,7 +338,9 @@ export default function GuestDashboard() {
     () =>
       bookings.filter(
         (booking) =>
-          booking.status === "awaiting_payment" || booking.status === "approved"
+          booking.status === "awaiting_payment" ||
+          booking.status === "approved" ||
+          booking.status === "payment_failed"
       ),
     [bookings]
   );
@@ -335,7 +348,7 @@ export default function GuestDashboard() {
   const upcomingTrips = useMemo(
     () =>
       bookings.filter((booking) => {
-        if (booking.status !== "paid") return false;
+        if (booking.status !== "paid" && booking.status !== "confirmed") return false;
         if (!booking.check_out) return true;
         const out = new Date(booking.check_out);
         return !Number.isNaN(out.getTime()) && out >= today;
@@ -351,7 +364,7 @@ export default function GuestDashboard() {
   const pastTrips = useMemo(
     () =>
       bookings.filter((booking) => {
-        if (booking.status !== "paid") return false;
+        if (booking.status !== "paid" && booking.status !== "confirmed") return false;
         if (!booking.check_out) return false;
         const out = new Date(booking.check_out);
         return !Number.isNaN(out.getTime()) && out < today;
@@ -404,7 +417,9 @@ export default function GuestDashboard() {
               </span>
             </p>
           ) : null}
-          {booking.status === "awaiting_payment" || booking.status === "approved" ? (
+          {booking.status === "awaiting_payment" ||
+          booking.status === "approved" ||
+          booking.status === "payment_failed" ? (
             <button
               type="button"
               onClick={() => resumePayment(booking)}
@@ -569,6 +584,8 @@ const STATUS_BADGE: Record<BookingStatus, string> = {
   awaiting_payment: "bg-[#0B0D10]/5 text-[#4B5563]",
   approved: "bg-[#0B0D10]/5 text-[#4B5563]",
   paid: "bg-[#14FF62]/20 text-[#0B0D10]",
+  confirmed: "bg-[#14FF62]/20 text-[#0B0D10]",
+  payment_failed: "bg-[#E5484D]/10 text-[#E5484D]",
   declined: "bg-[#E5484D]/10 text-[#E5484D]",
   cancelled: "bg-[#0B0D10]/5 text-[#4B5563]",
 };
@@ -577,7 +594,9 @@ const STATUS_LABEL: Record<BookingStatus, string> = {
   pending: "Pending",
   awaiting_payment: "Awaiting payment",
   approved: "Awaiting payment",
-  paid: "Paid",
+  paid: "Confirmed",
+  confirmed: "Confirmed",
+  payment_failed: "Payment failed",
   declined: "Declined",
   cancelled: "Cancelled",
 };

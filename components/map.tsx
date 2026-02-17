@@ -165,6 +165,19 @@ export default function AeronoocMap({
     zoom,
   }));
 
+  useEffect(() => {
+    const handler = (event: PromiseRejectionEvent) => {
+      const reason = event.reason as any;
+      if (!reason || reason.name !== "AbortError") return;
+      const stack = String(reason.stack || "");
+      if (stack.includes("mapbox-gl") || stack.includes("react-map-gl")) {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("unhandledrejection", handler);
+    return () => window.removeEventListener("unhandledrejection", handler);
+  }, []);
+
   const markerPins = useMemo(() => {
     if (!Array.isArray(listings) || listings.length === 0) return [];
     return listings
@@ -352,6 +365,11 @@ export default function AeronoocMap({
         mapStyle={mapStyle}
         viewState={viewState}
         onMoveEnd={handleMoveEnd}
+        onError={(evt: any) => {
+          const err = evt?.error;
+          if (err?.name === "AbortError") return;
+          console.error("Map error", err);
+        }}
         onLoad={() => setMapReady(true)}
         style={{ width: "100%", height: "100%" }}
         className="w-full h-full"

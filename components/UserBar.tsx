@@ -26,9 +26,9 @@ export const UserBar = () => {
           {
             id: user.id,
             full_name: user.user_metadata?.name ?? "",
-            avatar_url: user.user_metadata?.avatar_url ?? "",
-            is_guest: true,
-            is_host: false,
+            avatar_url: user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? "",
+            role_guest: true,
+            role_host: false,
           },
         ]);
       }

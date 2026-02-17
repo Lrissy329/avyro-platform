@@ -7,6 +7,7 @@ import type {
   BookingStatus,
 } from "@/lib/calendarTypes";
 import { formatRangeSummary, formatCurrency } from "@/lib/dateUtils";
+import { getChannelMeta } from "@/lib/calendarChannel";
 
 import {
   Sheet,
@@ -52,51 +53,6 @@ type BookingDrawerProps = {
   onSaveBlockNotes?: (event: LinearCalendarEvent, notes: string) => void | Promise<void>;
 };
 
-/** Channel pill icons – same language as the linear calendar */
-const channelIconForSource = (
-  source: LinearCalendarSource
-): React.ReactNode => {
-  const base =
-    "inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold";
-  switch (source) {
-    case "airbnb":
-      return <span className={`${base} bg-[#4B5563] text-white`}>a</span>;
-    case "vrbo":
-      return <span className={`${base} bg-[#4B5563] text-white`}>v</span>;
-    case "bookingcom":
-      return <span className={`${base} bg-[#4B5563] text-white`}>b</span>;
-    case "expedia":
-      return <span className={`${base} bg-[#4B5563] text-white`}>e</span>;
-    case "manual":
-      return <span className={`${base} bg-[#4B5563] text-white`}>m</span>;
-    case "booking":
-      return <span className={`${base} bg-[#4B5563] text-white`}>d</span>;
-    default:
-      return <span className={`${base} bg-slate-500 text-white`}>o</span>;
-  }
-};
-
-function getChannelLabel(source: LinearCalendarSource | undefined): string {
-  switch (source) {
-    case "booking":
-      return "Direct";
-    case "manual":
-      return "Manual block";
-    case "airbnb":
-      return "Airbnb";
-    case "vrbo":
-      return "Vrbo";
-    case "bookingcom":
-      return "Booking.com";
-    case "expedia":
-      return "Expedia";
-    case "other":
-      return "Other";
-    default:
-      return "Unknown";
-  }
-}
-
 function getStatusConfig(
   status: BookingStatus | string | undefined
 ): { label: string; className: string } {
@@ -113,11 +69,23 @@ function getStatusConfig(
         className:
           "bg-[#14FF62]/15 text-[#0B0D10] border border-[#14FF62]/40",
       };
+    case "confirmed":
+      return {
+        label: "Confirmed",
+        className:
+          "bg-[#14FF62]/15 text-[#0B0D10] border border-[#14FF62]/40",
+      };
     case "awaiting_payment":
       return {
         label: "Awaiting payment",
         className:
           "bg-slate-50 text-slate-600 border border-slate-200",
+      };
+    case "payment_failed":
+      return {
+        label: "Payment failed",
+        className:
+          "bg-[#E5484D]/10 text-[#E5484D] border border-[#E5484D]/40",
       };
     case "declined":
       return {
@@ -215,7 +183,8 @@ export function BookingDrawer({
   const guestEmail = event.meta?.guestEmail || "";
   const guestPhone = event.meta?.guestPhone || "";
   const nights = event.meta?.nights ?? null;
-  const channelLabel = getChannelLabel(event.source);
+  const channelMeta = getChannelMeta(event.source as LinearCalendarSource, { isBlock });
+  const channelLabel = channelMeta.label;
   const total = event.meta?.total ?? null;
   const hostPayout = event.meta?.hostPayout ?? null;
   const currency = event.meta?.currency ?? "GBP";
@@ -275,7 +244,13 @@ export function BookingDrawer({
             {/* Channel + status row */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                {channelIconForSource(event.source as LinearCalendarSource)}
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 ring-1 ring-black/10">
+                  <img
+                    src={channelMeta.badgeIcon}
+                    alt={channelMeta.label}
+                    className="h-4 w-4"
+                  />
+                </span>
                 <span>{channelLabel}</span>
               </div>
 

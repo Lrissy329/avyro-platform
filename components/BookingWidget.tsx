@@ -2,13 +2,14 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "@/lib/supabaseClient";
-import { computePricingFromMajor, getServiceFeeRate } from "@/lib/pricing";
+import { computeAllInPricing } from "@/lib/pricing";
 import { addDays, startOfDay } from "@/lib/dateUtils";
 import DatePicker from "react-datepicker";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { BookingStayType } from "@/lib/calendarTypes";
 
 type BookingWidgetProps = {
@@ -31,10 +32,27 @@ type GuestCounts = {
   pets: number;
 };
 
-const formatCurrency = (value: number, currency = "GBP") =>
-  new Intl.NumberFormat("en-GB", { style: "currency", currency, maximumFractionDigits: 0 }).format(
-    value
-  );
+type BookingQuote = {
+  nights: number;
+  currency: "GBP";
+  host_net_total_pence: number;
+  guest_total_pence: number;
+  guest_unit_price_pence: number;
+  platform_fee_bps: number;
+  stripe_var_bps: number;
+  stripe_fixed_pence: number;
+  pricing_version: "all_in_v1";
+};
+
+const formatCurrency = (value: number, currency = "GBP") => {
+  const isWhole = Math.round(value * 100) % 100 === 0;
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency,
+    minimumFractionDigits: isWhole ? 0 : 2,
+    maximumFractionDigits: isWhole ? 0 : 2,
+  }).format(value);
+};
 const formatUnits = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1));
 const toDateInputValue = (date: Date) => {
   const year = date.getFullYear();
@@ -128,8 +146,12 @@ export default function BookingWidget({
   const [blockedSet, setBlockedSet] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [verificationRequired, setVerificationRequired] = useState<number | null>(null);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [quote, setQuote] = useState<BookingQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const serviceFeeRate = getServiceFeeRate();
   const resolvedStayType = useMemo(
     () => resolveStayType(rentalType, bookingUnit),
     [rentalType, bookingUnit]
@@ -261,12 +283,83 @@ export default function BookingWidget({
 
   const billableUnits = stayTypeConfig.isHourly ? billableHours : billableNights;
 
-  const baseTotal =
-    basePrice && basePrice > 0 && billableUnits ? basePrice * billableUnits : null;
-  const priceSummary = useMemo(
-    () => (baseTotal ? computePricingFromMajor(baseTotal) : null),
-    [baseTotal]
+  const hostNetUnitPence =
+    basePrice && basePrice > 0 ? Math.round(basePrice * 100) : null;
+  const hostNetTotalPence =
+    basePrice && basePrice > 0 && billableUnits
+      ? Math.round(basePrice * billableUnits * 100)
+      : null;
+
+  useEffect(() => {
+    if (isHourlyStay) {
+      setQuote(null);
+      setQuoteLoading(false);
+      setQuoteError(null);
+      return;
+    }
+    if (!checkInDate || !checkOutDate || checkOutDate <= checkInDate) {
+      setQuote(null);
+      setQuoteLoading(false);
+      setQuoteError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const fetchQuote = async () => {
+      setQuoteLoading(true);
+      setQuoteError(null);
+      try {
+        const resp = await fetch("/api/bookings/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            listingId,
+            checkIn: checkInDate,
+            checkOut: checkOutDate,
+          }),
+          signal: controller.signal,
+        });
+        const payload = await resp.json();
+        if (!resp.ok) {
+          throw new Error(payload?.error ?? "Failed to fetch quote.");
+        }
+        setQuote(payload);
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+        setQuote(null);
+        setQuoteError(e?.message ?? "Failed to fetch quote.");
+      } finally {
+        setQuoteLoading(false);
+      }
+    };
+
+    fetchQuote();
+    return () => controller.abort();
+  }, [checkInDate, checkOutDate, isHourlyStay, listingId]);
+
+  const fallbackPricing = useMemo(
+    () =>
+      hostNetTotalPence
+        ? computeAllInPricing({ hostNetTotalPence })
+        : null,
+    [hostNetTotalPence]
   );
+  const fallbackUnitPrice = useMemo(
+    () =>
+      hostNetUnitPence
+        ? computeAllInPricing({ hostNetTotalPence: hostNetUnitPence }).guest_total_pence / 100
+        : null,
+    [hostNetUnitPence]
+  );
+
+  const guestUnitPrice = quote
+    ? quote.guest_unit_price_pence / 100
+    : fallbackUnitPrice;
+  const guestTotal = quote
+    ? quote.guest_total_pence / 100
+    : fallbackPricing
+    ? fallbackPricing.guest_total_pence / 100
+    : null;
   const friendlySummary = useMemo(() => {
     if (!checkInDate || !checkOutDate) return null;
     const start = new Date(toUtcIso(checkInDate, checkInTimeLocal));
@@ -437,99 +530,59 @@ export default function BookingWidget({
 
     setLoading(true);
     try {
-      const { data, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-      const user = data.user;
-      if (!user) {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const session = sessionData.session;
+      const user = session?.user ?? null;
+      if (!session || !user) {
         router.push(`/login?redirect=${encodeURIComponent(router.asPath)}`);
         return;
       }
 
-      const unitPrice = basePrice ?? 0;
-      if (unitPrice <= 0) {
-        setErr("Listing price unavailable. Please contact support.");
-        return;
-      }
-
-      const bookingResponse = await fetch("/api/bookings", {
+      const bookingResponse = await fetch("/api/bookings/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           listingId,
-          guestId: user.id,
-          checkInTime: checkInIso,
-          checkOutTime: checkOutIso,
-          stayType,
-          channel: "direct",
+          checkIn: checkInDate,
+          checkOut: checkOutDate,
           guests: totalGuests,
         }),
       });
 
       if (!bookingResponse.ok) {
         const payload = await bookingResponse.json().catch(() => null);
+        if (bookingResponse.status === 403 && payload?.code === "VERIFICATION_REQUIRED") {
+          setVerificationRequired(payload.requiredLevel ?? null);
+          setShowVerificationModal(true);
+          return;
+        }
         throw new Error(payload?.error ?? "Failed to create booking.");
       }
 
       const payload = await bookingResponse.json();
-      const bookingRow = payload?.booking;
-      if (!bookingRow?.id) {
-        throw new Error("Booking response missing ID.");
+      const bookingId = payload?.bookingId;
+      const checkoutUrl = payload?.checkoutUrl;
+      if (!bookingId || !checkoutUrl) {
+        throw new Error("Booking response missing checkout details.");
       }
-
-      const minimumUnits = stayTypeConfig.isHourly ? 0.5 : 1;
-      const billingUnits = Math.max(billableUnits, minimumUnits);
 
       await supabase
         .from("conversations")
         .upsert(
           {
-            booking_id: bookingRow.id,
-            host_id: bookingRow.host_id ?? hostId,
+            booking_id: bookingId,
+            host_id: hostId,
             guest_id: user.id,
           },
           { onConflict: "booking_id" }
         );
 
-      try {
-        const resp = await fetch("/api/stripe/create-checkout-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            bookingId: bookingRow.id,
-            listingId,
-            hostId,
-            guestId: user.id,
-            nights: billingUnits,
-            pricePerUnit: unitPrice,
-            checkInTime: checkInIso,
-            checkOutTime: checkOutIso,
-            stayType,
-            channel: "direct",
-            successUrl: `${window.location.origin}/booking/success?booking=${bookingRow.id}&session_id={CHECKOUT_SESSION_ID}`,
-            cancelUrl: `${window.location.origin}/listing/${listingId}?cancelled=1`,
-          }),
-        });
-
-        const sessionData = await resp.json();
-        if (!resp.ok) {
-          throw new Error(sessionData?.error ?? "Unable to start checkout.");
-        }
-
-        if (sessionData?.url) {
-          window.location.href = sessionData.url;
-          return;
-        }
-
-        throw new Error("Checkout session URL not provided.");
-      } catch (checkoutErr: any) {
-        console.error("Failed to create checkout session", checkoutErr);
-        setErr(
-          checkoutErr?.message || "We created the booking, but Stripe checkout is unavailable."
-        );
-        return;
-      }
-
-      setMsg("Booking request created. Checkout link unavailable.");
+      setMsg("Redirecting to secure payment…");
+      window.location.assign(checkoutUrl);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to create booking.");
     } finally {
@@ -538,11 +591,12 @@ export default function BookingWidget({
   };
 
   return (
-    <Card className="space-y-4 p-4 md:p-6 shadow-sm">
+    <div>
+      <Card className="space-y-4 p-4 md:p-6 shadow-sm">
       <div className="flex items-baseline justify-between">
         <div className="text-2xl font-semibold text-slate-900">
           <span className="font-mono tabular-nums">
-            {basePrice ? formatCurrency(basePrice) : "—"}
+            {guestUnitPrice ? formatCurrency(guestUnitPrice) : "—"}
           </span>
           <span className="ml-1 text-sm font-normal text-muted-foreground">
             / {stayTypeConfig.unitLabel}
@@ -821,6 +875,9 @@ export default function BookingWidget({
         </p>
       )}
 
+      {quoteError && !err && (
+        <p className="text-sm text-amber-600">{quoteError}</p>
+      )}
       {err && <p className="text-sm text-red-600">{err}</p>}
       {msg && <p className="text-sm text-[#14FF62]">{msg}</p>}
 
@@ -839,43 +896,57 @@ export default function BookingWidget({
         {loading ? "Reserving…" : "Book this stay"}
       </Button>
 
-      {priceSummary && (
+      {guestTotal != null && (
         <div className="border-t border-slate-100 pt-4 text-sm text-muted-foreground space-y-1.5">
-          <div className="flex justify-between text-slate-700">
-            <span>
-              <span className="font-mono tabular-nums">
-                {formatCurrency(basePrice ?? 0)}
-              </span>{" "}
-              × {formatUnits(billableUnits)}{" "}
-              {stayTypeConfig.unitLabel}
-              {billableUnits === 1 ? "" : "s"}
-            </span>
+          <div className="text-slate-700">
             <span className="font-mono tabular-nums">
-              {formatCurrency(priceSummary.base)}
-            </span>
+              {formatCurrency(guestUnitPrice ?? 0)}
+            </span>{" "}
+            × {formatUnits(billableUnits)}{" "}
+            {stayTypeConfig.unitLabel}
+            {billableUnits === 1 ? "" : "s"}
           </div>
-          <div className="flex justify-between">
-            <span>Aeronooc fee ({Math.round(serviceFeeRate * 100)}%)</span>
-            <span className="font-mono tabular-nums">
-              {formatCurrency(priceSummary.serviceFee)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span>Payment processing</span>
-            <span className="font-mono tabular-nums">
-              {formatCurrency(priceSummary.stripeFee)}
-            </span>
-          </div>
+          <p className="text-xs text-muted-foreground">Includes all fees</p>
           <div className="mt-2 flex justify-between text-base font-semibold text-slate-900">
             <span>Total before taxes</span>
             <span className="font-mono tabular-nums">
-              {formatCurrency(priceSummary.total)}
+              {formatCurrency(guestTotal ?? 0)}
             </span>
           </div>
         </div>
       )}
 
       <p className="text-center text-xs text-muted-foreground">You won’t be charged yet</p>
-    </Card>
+      </Card>
+
+      <Dialog open={showVerificationModal} onOpenChange={setShowVerificationModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verification required</DialogTitle>
+            <DialogDescription>
+              Verify for work travel to Instant Book this stay. Required level: {verificationRequired ?? 1}.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowVerificationModal(false)}
+            >
+              Not now
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setShowVerificationModal(false);
+                router.push("/guest/profile?tab=verification");
+              }}
+            >
+              Verify now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

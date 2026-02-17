@@ -26,18 +26,18 @@ export default function CompleteProfile() {
     e.preventDefault();
     if (!userId || !role) return;
 
-    const is_host = role === "host" || role === "both";
-    const is_guest = role === "guest" || role === "both";
+    const role_host = role === "host" || role === "both";
+    const role_guest = role === "guest" || role === "both";
 
     const { error } = await supabase.from("profiles").upsert({
       id: userId,
       full_name: fullName,
-      is_guest,
-      is_host,
+      role_guest,
+      role_host,
     });
 
     if (!error) {
-      if (is_host) {
+      if (role_host) {
         router.push("/host/dashboard");
       } else {
         router.push("/guest/dashboard");

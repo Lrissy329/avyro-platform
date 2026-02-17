@@ -186,6 +186,10 @@ export default function EditListingPage() {
       setOverrideError("Enter a positive price.");
       return;
     }
+    if (!Number.isInteger(priceValue)) {
+      setOverrideError("Use whole pounds (no decimals).");
+      return;
+    }
     setOverrideError(null);
     const id =
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -270,6 +274,7 @@ export default function EditListingPage() {
               if (!entry.start_date || !entry.end_date || entry.price === "") return null;
               const priceNum = Number(entry.price);
               if (!Number.isFinite(priceNum) || priceNum <= 0) return null;
+              if (!Number.isInteger(priceNum)) return null;
               return {
                 label: entry.label?.trim() || null,
                 start_date: entry.start_date,
@@ -659,6 +664,10 @@ export default function EditListingPage() {
                           onChange={(e) => setOverridePrice(e.target.value)}
                           className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
                           placeholder="e.g. 180"
+                          type="number"
+                          min="1"
+                          step="1"
+                          inputMode="numeric"
                         />
                       </label>
                       {overrideError && <p className="text-sm text-red-600">{overrideError}</p>}

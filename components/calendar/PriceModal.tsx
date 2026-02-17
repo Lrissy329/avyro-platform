@@ -43,6 +43,10 @@ export function PriceModal({
       setError("Enter a nightly price greater than zero.");
       return;
     }
+    if (!Number.isInteger(numericPrice)) {
+      setError("Use whole pounds (no decimals).");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

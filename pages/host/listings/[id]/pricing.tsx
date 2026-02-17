@@ -166,6 +166,12 @@ export default function ListingPricingPage() {
             <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-500">
               {helperCopy}
             </div>
+            <div className="rounded-2xl border border-slate-100 bg-white px-4 py-3 text-xs text-slate-600">
+              <p className="font-semibold text-slate-800">Commission</p>
+              <p className="mt-1">12% (drops to 10% after 7 nights, 8% after 28 nights)</p>
+              <p>£150 maximum per booking</p>
+              <p>First completed booking will be commission-free (processing fees still apply).</p>
+            </div>
 
             <div>
               <Label htmlFor="base-price">{priceLabel}</Label>

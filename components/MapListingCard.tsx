@@ -23,12 +23,10 @@ type MapListing = {
   photos?: string[] | null;
   type?: string;
   beds?: number | null;
-  maxGuests?: number | null;
   bedrooms?: number | null;
   bathrooms?: number | null;
   distanceKmToAirport?: number | null;
   freeCancellation?: boolean | null;
-  isSharedBookingAllowed?: boolean;
   travelMinutesMin?: number | null;
   travelMinutesMax?: number | null;
   travelMode?: string | null;
@@ -76,7 +74,7 @@ const normaliseType = (value?: string) => {
   const lower = value.replace(/_/g, " ").toLowerCase();
   if (lower.includes("entire")) return "Entire place";
   if (lower.includes("private")) return "Private room";
-  if (lower.includes("shared")) return "Shared room";
+  if (lower.includes("shared")) return "Private room";
   return value.replace(/_/g, " ");
 };
 
@@ -215,7 +213,6 @@ export default function MapListingCard({
       : null;
   const facts = [
     normaliseType(listing.type),
-    listing.maxGuests ? `Sleeps ${listing.maxGuests}` : null,
     listing.bedrooms ? `${listing.bedrooms} Bedroom${listing.bedrooms === 1 ? "" : "s"}` : null,
     listing.bathrooms ? `${listing.bathrooms} Bathroom${listing.bathrooms === 1 ? "" : "s"}` : null,
   ].filter(Boolean);
@@ -272,11 +269,6 @@ export default function MapListingCard({
               </span>
             )}
             <span className="text-xs font-medium text-slate-500">{restMeta}</span>
-            {listing.isSharedBookingAllowed && (
-              <span className="rounded-md bg-[#FEDD02] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-black">
-                Shared booking
-              </span>
-            )}
           </div>
 
           <div>

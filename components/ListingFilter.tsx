@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   HomeModernIcon,
   BuildingOfficeIcon,
-  UsersIcon,
   WifiIcon,
   FireIcon,
   BriefcaseIcon,
@@ -47,9 +46,6 @@ export default function ListingFilter({
   const [hasWifi, setHasWifi] = useState<boolean>(!!toBool(query.has_wifi));
   const [hasKitchen, setHasKitchen] = useState<boolean>(!!toBool(query.has_kitchen));
   const [hasDesk, setHasDesk] = useState<boolean>(!!toBool(query.has_desk));
-  const [isSharedBookingAllowed, setIsSharedBookingAllowed] = useState<boolean>(
-    toBool(query.is_shared_booking_allowed) ?? false
-  );
   const [commuteMax, setCommuteMax] = useState<"" | 15 | 30>(
     query.commute_max ? (Number(query.commute_max) as 15 | 30) : ""
   );
@@ -76,7 +72,6 @@ export default function ListingFilter({
     setHasWifi(!!toBool(query.has_wifi));
     setHasKitchen(!!toBool(query.has_kitchen));
     setHasDesk(!!toBool(query.has_desk));
-    setIsSharedBookingAllowed(!!toBool(query.is_shared_booking_allowed));
     setCommuteMax(query.commute_max ? (Number(query.commute_max) as 15 | 30) : "");
     setHasBlackout(!!toBool(query.blackout));
     setHasQuiet(!!toBool(query.quiet));
@@ -147,16 +142,6 @@ export default function ListingFilter({
               onChange({ roomType: next || undefined });
             }}
           />
-          <Chip
-            label="Shared room"
-            icon={<UsersIcon className="h-4 w-4" />}
-            active={roomType === "shared"}
-            onClick={() => {
-              const next = roomType === "shared" ? "" : "shared";
-              setRoomType(next);
-              onChange({ roomType: next || undefined });
-            }}
-          />
         </div>
 
         {/* Price bands */}
@@ -196,15 +181,6 @@ export default function ListingFilter({
               const next = !hasDesk;
               setHasDesk(next);
               onChange({ has_desk: next || undefined });
-            }}
-          />
-          <Chip
-            label="Shared booking"
-            active={isSharedBookingAllowed}
-            onClick={() => {
-              const next = !isSharedBookingAllowed;
-              setIsSharedBookingAllowed(next);
-              onChange({ is_shared_booking_allowed: next || undefined });
             }}
           />
         </div>

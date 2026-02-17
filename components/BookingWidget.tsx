@@ -38,10 +38,12 @@ type BookingQuote = {
   host_net_total_pence: number;
   guest_total_pence: number;
   guest_unit_price_pence: number;
+  platform_fee_est_pence: number;
+  platform_fee_capped: boolean;
   platform_fee_bps: number;
   stripe_var_bps: number;
   stripe_fixed_pence: number;
-  pricing_version: "all_in_v1";
+  pricing_version: "all_in_v2_tiers_cap_firstfree";
 };
 
 const formatCurrency = (value: number, currency = "GBP") => {
@@ -340,16 +342,24 @@ export default function BookingWidget({
   const fallbackPricing = useMemo(
     () =>
       hostNetTotalPence
-        ? computeAllInPricing({ hostNetTotalPence })
+        ? computeAllInPricing({
+            hostNetTotalPence,
+            nights: stayTypeConfig.isHourly ? 1 : billableNights,
+            isFirstCompletedBooking: false,
+          })
         : null,
-    [hostNetTotalPence]
+    [hostNetTotalPence, stayTypeConfig.isHourly, billableNights]
   );
   const fallbackUnitPrice = useMemo(
     () =>
       hostNetUnitPence
-        ? computeAllInPricing({ hostNetTotalPence: hostNetUnitPence }).guest_total_pence / 100
+        ? computeAllInPricing({
+            hostNetTotalPence: hostNetUnitPence,
+            nights: stayTypeConfig.isHourly ? 1 : billableNights,
+            isFirstCompletedBooking: false,
+          }).guest_total_pence / 100
         : null,
-    [hostNetUnitPence]
+    [hostNetUnitPence, stayTypeConfig.isHourly, billableNights]
   );
 
   const guestUnitPrice = quote
@@ -360,6 +370,17 @@ export default function BookingWidget({
     : fallbackPricing
     ? fallbackPricing.guest_total_pence / 100
     : null;
+
+  const effectivePlatformFeeBps = quote?.platform_fee_bps ?? fallbackPricing?.platform_fee_bps ?? null;
+  const platformFeeCapped = quote?.platform_fee_capped ?? fallbackPricing?.platform_fee_capped ?? false;
+
+  const commissionLabel = useMemo(() => {
+    if (effectivePlatformFeeBps == null) return null;
+    if (effectivePlatformFeeBps === 0) return "Commission: Free for first completed booking";
+    if (effectivePlatformFeeBps === 800) return "Commission: 8% (28+ nights)";
+    if (effectivePlatformFeeBps === 1000) return "Commission: 10% (7+ nights)";
+    return "Commission: 12% (1–6 nights)";
+  }, [effectivePlatformFeeBps]);
   const friendlySummary = useMemo(() => {
     if (!checkInDate || !checkOutDate) return null;
     const start = new Date(toUtcIso(checkInDate, checkInTimeLocal));
@@ -907,6 +928,12 @@ export default function BookingWidget({
             {billableUnits === 1 ? "" : "s"}
           </div>
           <p className="text-xs text-muted-foreground">Includes all fees</p>
+          {commissionLabel && (
+            <p className="text-xs text-slate-500">{commissionLabel}</p>
+          )}
+          {platformFeeCapped && (
+            <p className="text-xs text-slate-500">Commission capped at £150</p>
+          )}
           <div className="mt-2 flex justify-between text-base font-semibold text-slate-900">
             <span>Total before taxes</span>
             <span className="font-mono tabular-nums">

@@ -6,10 +6,9 @@ export interface Listing {
   airportCode: string; // e.g. "STN"
   hostId: string;
 
-  listing_type: "private_room" | "shared_room" | "entire_place";
+  listing_type: "private_room" | "entire_place";
   rental_type?: "overnight_stay" | "crashpad" | "day_use" | "split_rest";
   booking_unit?: "nightly" | "hourly";
-  max_guests: number;
   beds: number;
   bathrooms: number;
 
@@ -21,7 +20,6 @@ export interface Listing {
   available_from: string; // ISO date
   available_to: string;
 
-  is_shared_booking_allowed: boolean;
   amenities: string[]; // wifi, kitchen, etc.
   image_url: string;
 

@@ -13,7 +13,7 @@ type ListingForm = {
   location: string;
   rental_type: string | null;
   booking_unit: "nightly" | "hourly" | null;
-  type: "entire place" | "private room" | "shared room";
+  type: "entire place" | "private room";
   price_per_night: number | string;
   price_per_hour: number | string;
   price_per_week: number | string;
@@ -25,9 +25,7 @@ type ListingForm = {
     end_date: string;
     price: number | string;
   }[];
-  max_guests: number | string;
   bathrooms: number | string;
-  is_shared_booking_allowed: boolean;
   has_wifi: boolean;
   has_desk: boolean;
   has_kitchen: boolean;
@@ -112,6 +110,9 @@ export default function EditListingPage() {
         return;
       }
 
+      const rawType = (data.type as string | null) ?? "entire place";
+      const normalizedType = rawType === "shared room" ? "private room" : rawType;
+
       const initial: ListingForm = {
         title: data.title ?? "",
         description: data.description ?? "",
@@ -119,7 +120,7 @@ export default function EditListingPage() {
         location: data.location ?? "",
         rental_type: data.rental_type ?? null,
         booking_unit: data.booking_unit ?? null,
-        type: (data.type as ListingForm["type"]) ?? "entire place",
+        type: normalizedType as ListingForm["type"],
         price_per_night: data.price_per_night ?? "",
         price_per_hour: data.price_per_hour ?? "",
         price_per_week: data.price_per_week ?? "",
@@ -137,9 +138,7 @@ export default function EditListingPage() {
                 price: entry.price ?? "",
               }))
             : [],
-        max_guests: data.max_guests ?? "",
         bathrooms: data.bathrooms ?? "",
-        is_shared_booking_allowed: !!data.is_shared_booking_allowed,
         has_wifi: !!data.has_wifi,
         has_desk: !!data.has_desk,
         has_kitchen: !!data.has_kitchen,
@@ -331,9 +330,7 @@ export default function EditListingPage() {
       airport_code: form.airport_code,
       location: form.location,
       type: form.type,
-      max_guests: form.max_guests === "" ? null : Number(form.max_guests),
       bathrooms: form.bathrooms === "" ? null : Number(form.bathrooms),
-      is_shared_booking_allowed: form.is_shared_booking_allowed,
       has_wifi: form.has_wifi,
       has_desk: form.has_desk,
       has_kitchen: form.has_kitchen,
@@ -510,18 +507,7 @@ export default function EditListingPage() {
                 >
                   <option value="entire place">Entire place</option>
                   <option value="private room">Private room</option>
-                  <option value="shared room">Shared room</option>
                 </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Max guests</label>
-                <input
-                  type="number"
-                  name="max_guests"
-                  value={form.max_guests}
-                  onChange={onChange}
-                  className="w-full border border-gray-300 rounded px-3 py-2"
-                />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Bathrooms</label>
@@ -532,18 +518,6 @@ export default function EditListingPage() {
                   onChange={onChange}
                   className="w-full border border-gray-300 rounded px-3 py-2"
                 />
-              </div>
-              <div className="flex items-center gap-2 md:col-span-2">
-                <input
-                  id="is_shared_booking_allowed"
-                  type="checkbox"
-                  name="is_shared_booking_allowed"
-                  checked={form.is_shared_booking_allowed}
-                  onChange={onChange}
-                />
-                <label htmlFor="is_shared_booking_allowed" className="text-sm">
-                  Allow shared bookings
-                </label>
               </div>
             </div>
           </section>

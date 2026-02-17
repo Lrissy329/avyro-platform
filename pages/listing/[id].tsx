@@ -33,7 +33,6 @@ type DbListing = {
     end_date: string;
     price: number;
   }> | null;
-  max_guests: number | null;
   bathrooms: number | null;
   beds: number | null;
   type: string | null;
@@ -276,7 +275,7 @@ export default function ListingDetail() {
       const { data, error } = await supabase
         .from("listings")
         .select(
-          "id, title, description, location, airport_code, primary_poi_id, price_per_night, price_per_hour, price_per_week, price_per_month, price_overrides, max_guests, bathrooms, beds, type, rental_type, booking_unit, photos, amenities, user_id, latitude, longitude"
+          "id, title, description, location, airport_code, primary_poi_id, price_per_night, price_per_hour, price_per_week, price_per_month, price_overrides, bathrooms, beds, type, rental_type, booking_unit, photos, amenities, user_id, latitude, longitude"
         )
         .eq("id", id)
         .single();
@@ -437,10 +436,6 @@ export default function ListingDetail() {
       setBookingError("Guest count must be at least 1.");
       return;
     }
-    if (totalGuests > (listing.max_guests || 1)) {
-      setBookingError("Guest count exceeds maximum.");
-      return;
-    }
     setBookingLoading(true);
     try {
       const { data, error: authError } = await supabase.auth.getUser();
@@ -559,12 +554,11 @@ export default function ListingDetail() {
                   <div className="flex flex-wrap gap-2 text-sm text-slate-500">
                     {rentalTypeLabel && <span>{rentalTypeLabel}</span>}
                     <span>{listing.type?.replace(/_/g, " ") ?? "Private stay"}</span>
-                    <span>• {pluralise(listing.max_guests, "guest")}</span>
                     <span>• {pluralise(listing.beds, "bed")}</span>
                     <span>• {pluralise(listing.bathrooms, "bath")}</span>
                   </div>
                   <p className="text-sm text-slate-500">
-                    Perfect for {listing.max_guests ?? 1}+ travellers looking to be close to the
+                    Perfect for travellers looking to be close to the
                     airport and city links.
                   </p>
                 </div>

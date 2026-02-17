@@ -130,13 +130,12 @@ function formatSearchLocation(raw: unknown): string {
 type SearchListing = {
   id: string;
   title: string;
-  maxGuests: number;
   airportCode?: string;
   location?: string;
   locationRaw?: string;
   coords?: [number, number];
   coordsMissing?: boolean;
-  type?: "private_room" | "shared_room" | "entire_place";
+  type?: "private_room" | "entire_place";
   bedrooms?: number | null;
   beds?: number | null;
   bathrooms?: number | null;
@@ -149,7 +148,6 @@ type SearchListing = {
   travelMinutesMin?: number | null;
   travelMinutesMax?: number | null;
   travelMode?: string | null;
-  isSharedBookingAllowed?: boolean;
   quietForRest?: boolean | null;
   blackoutBlinds?: boolean | null;
   access24_7?: boolean | null;
@@ -212,7 +210,6 @@ export default function SearchPage() {
       has_microwave: get("has_microwave"),
       has_coffee_maker: get("has_coffee_maker"),
       has_fridge: get("has_fridge"),
-      is_shared_booking_allowed: get("is_shared_booking_allowed"),
       commute_max: get("commute_max"),
       blackout: get("blackout"),
       quiet: get("quiet"),
@@ -414,7 +411,6 @@ export default function SearchPage() {
 
     const typeMap: Record<string, SearchListing["type"]> = {
       private: "private_room",
-      shared: "shared_room",
       entire: "entire_place",
     } as const;
     const wantedType = (roomType && typeMap[roomType]) || undefined;
@@ -444,9 +440,8 @@ export default function SearchPage() {
         if (bookingUnit === "hourly" || bookingUnit === "nightly") {
           queryBuilder = queryBuilder.eq("booking_unit", bookingUnit);
         }
-        if (guests > 1) queryBuilder = queryBuilder.gte("max_guests", guests);
 
-        // NEW: capacity
+        // Room details
         if (!isNaN(Number(q.bedrooms)) && Number(q.bedrooms) > 0) queryBuilder = queryBuilder.gte("bedrooms", Number(q.bedrooms));
         if (!isNaN(Number(q.beds)) && Number(q.beds) > 0) queryBuilder = queryBuilder.gte("beds", Number(q.beds));
         if (!isNaN(Number(q.bathrooms)) && Number(q.bathrooms) > 0) queryBuilder = queryBuilder.gte("bathrooms", Number(q.bathrooms));
@@ -466,11 +461,6 @@ export default function SearchPage() {
           const val = toBool((q as any)[field]);
           if (val === true) queryBuilder = queryBuilder.eq(field, true);
         });
-
-        // NEW: shared booking toggle
-        if (toBool(q.is_shared_booking_allowed) === true) {
-          queryBuilder = queryBuilder.eq("is_shared_booking_allowed", true);
-        }
 
         const commuteMax = q.commute_max ? Number(q.commute_max) : NaN;
         if (!Number.isNaN(commuteMax)) {
@@ -556,7 +546,7 @@ export default function SearchPage() {
           const toType = (t: any): SearchListing["type"] | undefined => {
             const s = (t || "").toString().toLowerCase();
             if (s.includes("private")) return "private_room";
-            if (s.includes("shared")) return "shared_room";
+            if (s.includes("shared")) return "private_room";
             if (s.includes("entire")) return "entire_place";
             return undefined;
           };
@@ -567,7 +557,6 @@ export default function SearchPage() {
           return {
             id,
             title: l.title ?? l.name ?? "Listing",
-            maxGuests: Number(l.max_guests ?? 1),
             airportCode: airport_code,
             location: locationLabel,
             locationFallback: locationLabel,
@@ -588,7 +577,6 @@ export default function SearchPage() {
             travelMinutesMin: safeNumber(travelTypical),
             travelMinutesMax: safeNumber(travelBuffer),
             travelMode,
-            isSharedBookingAllowed: Boolean((l as any).is_shared_booking_allowed),
             quietForRest: Boolean((l as any).quiet_for_rest),
             blackoutBlinds: Boolean((l as any).blackout_blinds),
             access24_7: Boolean((l as any).access_24_7),
@@ -686,7 +674,6 @@ export default function SearchPage() {
       has_wifi: undefined,
       has_kitchen: undefined,
       has_desk: undefined,
-      is_shared_booking_allowed: undefined,
       commute_max: undefined,
       blackout: undefined,
       quiet: undefined,
@@ -729,7 +716,6 @@ export default function SearchPage() {
       const map: Record<string, string> = {
         entire: "Entire place",
         private: "Private room",
-        shared: "Shared room",
       };
       items.push({
         key: "roomType",
@@ -1220,7 +1206,6 @@ export default function SearchPage() {
                   {[
                     { value: "entire", label: "Entire place" },
                     { value: "private", label: "Private room" },
-                    { value: "shared", label: "Shared room" },
                   ].map((option) => (
                     <button
                       key={option.value}

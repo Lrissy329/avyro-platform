@@ -30,8 +30,7 @@ const AIRPORT_SUGGESTIONS = [
 
 type Filters = {
   airport: string;
-  roomType: string; // "entire place" | "private room" | "shared room" | ""
-  sharedOnly: boolean;
+  roomType: string; // "entire place" | "private room" | ""
 };
 
 function coerceAirport(x: any) {
@@ -61,7 +60,7 @@ const normaliseTypeLabel = (value: unknown): string | null => {
   const lower = value.replace(/_/g, " ").toLowerCase();
   if (lower.includes("entire")) return "Entire place";
   if (lower.includes("private")) return "Private room";
-  if (lower.includes("shared")) return "Shared room";
+  if (lower.includes("shared")) return "Private room";
   return value.replace(/_/g, " ");
 };
 
@@ -88,13 +87,11 @@ const buildMetaLine = (listing: any): string | null => {
   const typeLabel = normaliseTypeLabel(
     listing.listing_type ?? listing.type ?? listing.roomType ?? listing.listingType
   );
-  const sleeps = toNumber(listing.max_guests ?? listing.maxGuests);
 
   const parts: string[] = [];
   if (minutes != null && airport) parts.push(`${minutes} min to ${airport}`);
   else if (airport) parts.push(airport);
   if (typeLabel) parts.push(typeLabel);
-  else if (sleeps != null) parts.push(`Sleeps ${sleeps}`);
 
   return parts.length ? parts.join(" · ") : null;
 };
@@ -113,7 +110,6 @@ export default function Home() {
   const [filters, setFilters] = useState<Filters>({
     airport: "",
     roomType: "",
-    sharedOnly: false,
   });
   const airportChoices = useMemo(() => {
     const q = "";
@@ -177,12 +173,10 @@ export default function Home() {
     return (listings || []).filter((l: any) => {
       const airport = coerceAirport(l);
       const type = coerceType(l);
-      const isSharedAllowed = !!l?.is_shared_booking_allowed;
 
       const airportOk = !filters.airport || airport === filters.airport;
       const typeOk = !filters.roomType || type === filters.roomType;
-      const sharedOk = !filters.sharedOnly || isSharedAllowed;
-      return airportOk && typeOk && sharedOk;
+      return airportOk && typeOk;
     });
   }, [listings, filters]);
 
@@ -191,7 +185,6 @@ export default function Home() {
     setFilters((f) => ({ ...f, airport: e.target.value }));
   const onTypeClick = (val: string) =>
     setFilters((f) => ({ ...f, roomType: f.roomType === val ? "" : val }));
-  const onSharedToggle = () => setFilters((f) => ({ ...f, sharedOnly: !f.sharedOnly }));
 
   // New: handle search from SearchBar -> navigate to /search with query params
   const onSearchBar = (payload: any) => {

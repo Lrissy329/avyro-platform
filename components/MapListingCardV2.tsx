@@ -23,7 +23,6 @@ type MapListing = {
   photos?: string[] | null;
   type?: string;
   beds?: number | null;
-  maxGuests?: number | null;
   bedrooms?: number | null;
   bathrooms?: number | null;
   distanceKmToAirport?: number | null;
@@ -76,7 +75,7 @@ const normaliseType = (value?: string) => {
   const lower = value.replace(/_/g, " ").toLowerCase();
   if (lower.includes("entire")) return "Entire place";
   if (lower.includes("private")) return "Private room";
-  if (lower.includes("shared")) return "Shared room";
+  if (lower.includes("shared")) return "Private room";
   return value.replace(/_/g, " ");
 };
 
@@ -132,7 +131,6 @@ const buildTitle = (listing: MapListing) => {
 
 const buildFacts = (listing: MapListing) => {
   const parts = [
-    listing.maxGuests ? `Sleeps ${listing.maxGuests}` : null,
     listing.bedrooms ? pluralize(listing.bedrooms, "Bedroom") : null,
     listing.bathrooms ? pluralize(listing.bathrooms, "Bathroom") : null,
   ].filter(Boolean);

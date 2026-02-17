@@ -145,11 +145,31 @@ export default async function handler(
     return res.status(409).json({ error: "Listing nightly price unavailable." });
   }
 
+  let isFirstCompletedBooking = false;
+  if (listingRow.user_id) {
+    const { count, error: bookingCountError } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("host_id", listingRow.user_id)
+      .in("status", ["confirmed", "completed"]);
+    if (bookingCountError) {
+      console.error("[api/bookings/create] failed to check host bookings", bookingCountError);
+    } else {
+      isFirstCompletedBooking = (count ?? 0) === 0;
+    }
+  }
+
   const hostNetNightlyPence = Math.round(Number(nightlyMajor) * 100);
   const hostNetTotalPence = hostNetNightlyPence * nights;
-  const pricing = computeAllInPricing({ hostNetTotalPence });
+  const pricing = computeAllInPricing({
+    hostNetTotalPence,
+    nights,
+    isFirstCompletedBooking,
+  });
   const guestUnitPricePence = computeAllInPricing({
     hostNetTotalPence: hostNetNightlyPence,
+    nights,
+    isFirstCompletedBooking,
   }).guest_total_pence;
 
   const checkInTimeIso = new Date(`${checkIn}T00:00:00Z`).toISOString();
@@ -173,7 +193,7 @@ export default async function handler(
     platform_fee_bps: pricing.platform_fee_bps,
     stripe_var_bps: pricing.stripe_var_bps,
     stripe_fixed_pence: pricing.stripe_fixed_pence,
-    pricing_version: "all_in_v1",
+    pricing_version: "all_in_v2_tiers_cap_firstfree",
   };
 
   if (typeof guests === "number") {

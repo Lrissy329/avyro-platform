@@ -25,12 +25,13 @@ type HostQuote = {
   host_net_nightly_pence: number;
   guest_unit_price_pence: number;
   platform_fee_est_pence: number;
+  platform_fee_capped: boolean;
   stripe_fee_est_pence: number;
   platform_margin_est_pence: number;
   platform_fee_bps: number;
   stripe_var_bps: number;
   stripe_fixed_pence: number;
-  pricing_version: "all_in_v1";
+  pricing_version: "all_in_v2_tiers_cap_firstfree";
 };
 
 const PLACE_TYPES = [
@@ -43,8 +44,7 @@ const PLACE_TYPES = [
 
 const ROOM_TYPES = [
   { value: "entire place", label: "An entire place", description: "Guests have the whole place to themselves.", icon: "🏠" },
-  { value: "private room", label: "A room", description: "Guests have their own room in a home, plus access to shared spaces.", icon: "🚪" },
-  { value: "shared room", label: "A shared room", description: "Guests sleep in a room shared with others.", icon: "🛏️" },
+  { value: "private room", label: "A room", description: "Guests have their own room in a home.", icon: "🚪" },
 ];
 
 const RENTAL_TYPE_OPTIONS = [
@@ -143,8 +143,6 @@ export default function CreateListing() {
     price_per_week: "",
     price_per_month: "",
     price_overrides: [] as PriceOverrideInput[],
-    max_guests: "",
-    is_shared_booking_allowed: false,
     bedrooms: "",
     beds: "",
     bathrooms: "",
@@ -325,7 +323,6 @@ export default function CreateListing() {
       }
     }
     if (step === 5) {
-      if (!formData.max_guests) newErrors.max_guests = "Number of guests is required.";
       if (!isHourly) {
         if (!formData.bedrooms) newErrors.bedrooms = "Number of bedrooms is required.";
         if (!formData.beds) newErrors.beds = "Number of beds is required.";
@@ -663,7 +660,6 @@ const handleCardSelect = (name: string, value: string) => {
       price_per_week: isHourlyBooking ? null : weekly,
       price_per_month: isHourlyBooking ? null : monthly,
       price_overrides: isHourlyBooking ? null : overrides.length ? overrides : null,
-      max_guests: formData.max_guests === "" ? null : Number(formData.max_guests),
       bedrooms: formData.bedrooms === "" ? null : Number(formData.bedrooms),
       beds: formData.beds === "" ? null : Number(formData.beds),
       bathrooms: formData.bathrooms === "" ? null : Number(formData.bathrooms),
@@ -972,16 +968,6 @@ const handleCardSelect = (name: string, value: string) => {
               <h2 className="text-2xl font-medium mb-6 text-center">Share some basics about your place</h2>
                 <div className="grid grid-cols-2 gap-4 mb-8">
     <div>
-      <label className="block text-sm font-medium text-gray-800 mb-1" htmlFor="max_guests">Guests</label>
-      <input
-        id="max_guests"
-        type="number"
-        name="max_guests"
-        value={formData.max_guests}
-        onChange={handleChange}
-        className="border border-black p-3 rounded w-full"
-      />
-      {errors.max_guests && <p className="text-red-600 text-sm mt-1">{errors.max_guests}</p>}
     </div>
     {!isHourlyBooking && (
       <div>
@@ -1028,7 +1014,7 @@ const handleCardSelect = (name: string, value: string) => {
   </div>
   {isHourlyBooking && (
     <p className="text-xs text-gray-500">
-      Hourly listings skip bedroom counts and focus on capacity.
+      Hourly listings skip bedroom counts and focus on space basics.
     </p>
   )}
 </section>
@@ -1435,17 +1421,6 @@ const handleCardSelect = (name: string, value: string) => {
   </>
 )}
 
-<label className="inline-flex items-center mt-4">
-
-                <input
-                  type="checkbox"
-                  name="is_shared_booking_allowed"
-                  checked={formData.is_shared_booking_allowed}
-                  onChange={handleChange}
-                  className="form-checkbox border border-black"
-                />
-                <span className="ml-2 text-sm text-gray-800">Allow shared bookings?</span>
-              </label>
             </section>
           )}
         </div>

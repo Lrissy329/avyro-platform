@@ -9,10 +9,12 @@ type QuoteResponse = {
   host_net_total_pence: number;
   guest_total_pence: number;
   guest_unit_price_pence: number;
+  platform_fee_est_pence: number;
+  platform_fee_capped: boolean;
   platform_fee_bps: number;
   stripe_var_bps: number;
   stripe_fixed_pence: number;
-  pricing_version: "all_in_v1";
+  pricing_version: "all_in_v2_tiers_cap_firstfree";
 };
 
 const parseIsoDate = (value?: string) => {
@@ -87,9 +89,15 @@ export default async function handler(
 
   const hostNetNightlyPence = Math.round(Number(nightlyMajor) * 100);
   const hostNetTotalPence = hostNetNightlyPence * nights;
-  const pricing = computeAllInPricing({ hostNetTotalPence });
+  const pricing = computeAllInPricing({
+    hostNetTotalPence,
+    nights,
+    isFirstCompletedBooking: false,
+  });
   const guestUnitPricePence = computeAllInPricing({
     hostNetTotalPence: hostNetNightlyPence,
+    nights,
+    isFirstCompletedBooking: false,
   }).guest_total_pence;
 
   return res.status(200).json({
@@ -98,9 +106,11 @@ export default async function handler(
     host_net_total_pence: hostNetTotalPence,
     guest_total_pence: pricing.guest_total_pence,
     guest_unit_price_pence: guestUnitPricePence,
+    platform_fee_est_pence: pricing.platform_fee_est_pence,
+    platform_fee_capped: pricing.platform_fee_capped,
     platform_fee_bps: pricing.platform_fee_bps,
     stripe_var_bps: pricing.stripe_var_bps,
     stripe_fixed_pence: pricing.stripe_fixed_pence,
-    pricing_version: "all_in_v1",
+    pricing_version: "all_in_v2_tiers_cap_firstfree",
   });
 }

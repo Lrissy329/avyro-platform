@@ -42,7 +42,6 @@ type ListingRow = {
   user_id?: string | null;
   listing_type: Listing["listing_type"] | null;
   type?: string | null;
-  is_shared_booking_allowed: boolean | null;
   photos: string[] | null;
   thumbnail?: string | null;
 };
@@ -176,7 +175,7 @@ export default function GuestDashboard() {
       const { data: listingRows, error: listingErr } = await supabase
         .from("listings")
         .select(
-          "id, title, location, price_per_night, price_per_hour, booking_unit, listing_type, type, is_shared_booking_allowed, photos, user_id"
+          "id, title, location, price_per_night, price_per_hour, booking_unit, listing_type, type, photos, user_id"
         )
         .in("id", missingIds);
 
@@ -232,7 +231,7 @@ export default function GuestDashboard() {
     const { data, error } = await supabase
       .from("listings")
       .select(
-        "id, title, location, price_per_night, price_per_hour, booking_unit, listing_type, type, is_shared_booking_allowed, photos, user_id"
+        "id, title, location, price_per_night, price_per_hour, booking_unit, listing_type, type, photos, user_id"
       )
       .order("created_at", { ascending: false })
       .limit(12);

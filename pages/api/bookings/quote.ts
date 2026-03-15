@@ -60,7 +60,7 @@ export default async function handler(
   const supabase = getSupabaseServerClient();
   const { data: listingRow, error: listingError } = await supabase
     .from("listings")
-    .select("id, price_per_night, price_per_hour, booking_unit, rental_type")
+    .select("id, user_id, price_per_night, price_per_hour, booking_unit, rental_type")
     .eq("id", listingId)
     .maybeSingle();
 
@@ -87,17 +87,32 @@ export default async function handler(
     return res.status(409).json({ error: "Listing nightly price unavailable." });
   }
 
+  let isFirstCompletedBooking = false;
+  if (listingRow.user_id) {
+    const { count, error: bookingCountError } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("host_id", listingRow.user_id)
+      .in("status", ["confirmed", "completed"]);
+
+    if (bookingCountError) {
+      console.error("[api/bookings/quote] failed to check host bookings", bookingCountError);
+    } else {
+      isFirstCompletedBooking = (count ?? 0) === 0;
+    }
+  }
+
   const hostNetNightlyPence = Math.round(Number(nightlyMajor) * 100);
   const hostNetTotalPence = hostNetNightlyPence * nights;
   const pricing = computeAllInPricing({
     hostNetTotalPence,
     nights,
-    isFirstCompletedBooking: false,
+    isFirstCompletedBooking,
   });
   const guestUnitPricePence = computeAllInPricing({
     hostNetTotalPence: hostNetNightlyPence,
     nights,
-    isFirstCompletedBooking: false,
+    isFirstCompletedBooking,
   }).guest_total_pence;
 
   return res.status(200).json({

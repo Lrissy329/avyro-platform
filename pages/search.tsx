@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 
 import MapListingCard from "@/components/MapListingCardV2";
 import SearchBar from "@/components/SearchBar";
+import { computeAllInPricing } from "@/lib/pricing";
 import { supabase } from "@/lib/supabaseClient";
 
 const MapView = dynamic(() => import("@/components/map"), { ssr: false });
@@ -141,6 +142,7 @@ type SearchListing = {
   bathrooms?: number | null;
   pricePerNight?: number;
   pricePerHour?: number;
+  guestPriceForStay?: number;
   booking_unit?: "nightly" | "hourly" | null;
   thumbnail?: string;
   distanceKmToAirport: number | null;
@@ -316,6 +318,34 @@ export default function SearchPage() {
   }, [stayWindow]);
 
   const hasTimeSelection = Boolean(q.checkInTime || q.checkOutTime);
+  const mapListings = useMemo(() => {
+    return listings.map((listing) => {
+      const bookingUnit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
+      const unitCount =
+        bookingUnit === "hourly"
+          ? hasTimeSelection && stayHours > 0
+            ? stayHours
+            : null
+          : stayNights > 0
+          ? stayNights
+          : null;
+      const hostUnitPrice =
+        bookingUnit === "hourly" ? listing.pricePerHour ?? null : listing.pricePerNight ?? null;
+
+      if (hostUnitPrice == null || hostUnitPrice <= 0 || unitCount == null || unitCount <= 0) {
+        return listing;
+      }
+
+      const guestPriceForStay =
+        computeAllInPricing({
+          hostNetTotalPence: Math.round(hostUnitPrice * unitCount * 100),
+          nights: bookingUnit === "hourly" ? 1 : unitCount,
+          isFirstCompletedBooking: false,
+        }).guest_total_pence / 100;
+
+      return { ...listing, guestPriceForStay };
+    });
+  }, [hasTimeSelection, listings, stayHours, stayNights]);
   const draftPriceUnit = draftFilters.bookingUnit === "hourly" ? "hour" : "night";
   const initialGuests = useMemo(() => {
     if (q.guests) {
@@ -1042,7 +1072,7 @@ export default function SearchPage() {
                   zoom={11}
                   style={{ width: "100%", height: "100%" }}
                   className="h-full"
-                  listings={listings}
+                  listings={mapListings}
                   hoverId={hoverId}
                   activeId={activeId}
                   onHover={setHoverId}

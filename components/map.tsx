@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { MapRef } from "react-map-gl";
+import { computeGuestTotalMajorFromHostNet } from "@/lib/pricing";
 
 const MapGL = dynamic(() => import("react-map-gl").then((m: any) => m.default ?? m.Map), {
   ssr: false,
@@ -22,6 +23,12 @@ type ListingPin = {
   longitude?: number;
   title?: string;
   name?: string;
+  guest_price_for_stay?: number;
+  guestPriceForStay?: number;
+  guest_price_per_night?: number;
+  guestPricePerNight?: number;
+  price_per_hour?: number;
+  pricePerHour?: number;
   price_per_night?: number;
   pricePerNight?: number;
 };
@@ -81,6 +88,20 @@ function resolveCoords(pin: ListingPin): [number, number] | null {
   const lat = toNumber((pin as any).latitude ?? (pin as any).lat);
   if (isValidLng(lng) && isValidLat(lat)) return [lng, lat];
   return null;
+}
+
+function isMapboxAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { name?: unknown; message?: unknown; stack?: unknown };
+  const name = typeof maybeError.name === "string" ? maybeError.name : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message : "";
+  const stack = typeof maybeError.stack === "string" ? maybeError.stack : "";
+  if (name !== "AbortError") return false;
+  return (
+    message.includes("signal is aborted without reason") ||
+    stack.includes("mapbox-gl") ||
+    stack.includes("react-map-gl")
+  );
 }
 
 function MarkerDot({
@@ -167,15 +188,23 @@ export default function AeronoocMap({
 
   useEffect(() => {
     const handler = (event: PromiseRejectionEvent) => {
-      const reason = event.reason as any;
-      if (!reason || reason.name !== "AbortError") return;
-      const stack = String(reason.stack || "");
-      if (stack.includes("mapbox-gl") || stack.includes("react-map-gl")) {
+      if (isMapboxAbortError(event.reason)) {
         event.preventDefault();
       }
     };
+
+    const errorHandler = (event: ErrorEvent) => {
+      if (isMapboxAbortError(event.error)) {
+        event.preventDefault();
+      }
+    };
+
     window.addEventListener("unhandledrejection", handler);
-    return () => window.removeEventListener("unhandledrejection", handler);
+    window.addEventListener("error", errorHandler);
+    return () => {
+      window.removeEventListener("unhandledrejection", handler);
+      window.removeEventListener("error", errorHandler);
+    };
   }, []);
 
   const markerPins = useMemo(() => {
@@ -184,12 +213,32 @@ export default function AeronoocMap({
       .map((pin) => {
         const coords = resolveCoords(pin);
         if (!coords) return null;
+        const guestStayTotal = toNumber(
+          pin.guest_price_for_stay ?? pin.guestPriceForStay
+        );
+        const guestNightly = toNumber(
+          pin.guest_price_per_night ?? pin.guestPricePerNight
+        );
+        const hostUnitPrice = toNumber(
+          pin.price_per_hour ??
+            pin.pricePerHour ??
+          pin.price_per_night ?? pin.pricePerNight ?? (pin as any).price
+        );
+        const nightly =
+          guestStayTotal ??
+          guestNightly ??
+          (hostUnitPrice != null
+            ? computeGuestTotalMajorFromHostNet(hostUnitPrice, {
+                nights: 1,
+                isFirstCompletedBooking: false,
+              })
+            : null);
         return {
           id: pin.id,
           longitude: coords[0],
           latitude: coords[1],
           title: pin.title || pin.name || "Listing",
-          nightly: toNumber(pin.price_per_night ?? pin.pricePerNight ?? (pin as any).price),
+          nightly,
         };
       })
       .filter(Boolean) as Array<{
@@ -363,11 +412,12 @@ export default function AeronoocMap({
         ref={mapRef}
         mapboxAccessToken={token}
         mapStyle={mapStyle}
+        reuseMaps
         viewState={viewState}
         onMoveEnd={handleMoveEnd}
         onError={(evt: any) => {
           const err = evt?.error;
-          if (err?.name === "AbortError") return;
+          if (isMapboxAbortError(err)) return;
           console.error("Map error", err);
         }}
         onLoad={() => setMapReady(true)}

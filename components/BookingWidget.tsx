@@ -299,12 +299,17 @@ export default function BookingWidget({
       setQuoteError(null);
       return;
     }
-    if (!checkInDate || !checkOutDate || checkOutDate <= checkInDate) {
-      setQuote(null);
-      setQuoteLoading(false);
-      setQuoteError(null);
-      return;
-    }
+
+    // Keep the default nightly price aligned with backend checkout logic even
+    // before dates are selected by requesting an indicative 1-night quote.
+    const hasSelectedRange =
+      Boolean(checkInDate) && Boolean(checkOutDate) && checkOutDate > checkInDate;
+    const quoteCheckIn = hasSelectedRange
+      ? checkInDate
+      : toDateInputValue(startOfDay(new Date()));
+    const quoteCheckOut = hasSelectedRange
+      ? checkOutDate
+      : addDaysToDateInput(quoteCheckIn, 1);
 
     const controller = new AbortController();
     const fetchQuote = async () => {
@@ -316,8 +321,8 @@ export default function BookingWidget({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             listingId,
-            checkIn: checkInDate,
-            checkOut: checkOutDate,
+            checkIn: quoteCheckIn,
+            checkOut: quoteCheckOut,
           }),
           signal: controller.signal,
         });
@@ -545,6 +550,16 @@ export default function BookingWidget({
       const hours = durationMs / (1000 * 60 * 60);
       if (hours < 0.5) {
         setErr("Hourly stays must be at least 30 minutes.");
+        return;
+      }
+    }
+    if (!isHourlyStay) {
+      if (quoteLoading) {
+        setErr("Updating price… please try again in a moment.");
+        return;
+      }
+      if (!quote) {
+        setErr(quoteError ?? "Unable to confirm pricing for these dates. Please try again.");
         return;
       }
     }
@@ -900,7 +915,11 @@ export default function BookingWidget({
         <p className="text-sm text-amber-600">{quoteError}</p>
       )}
       {err && <p className="text-sm text-red-600">{err}</p>}
-      {msg && <p className="text-sm text-[#14FF62]">{msg}</p>}
+      {msg && (
+        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {msg}
+        </p>
+      )}
 
       <Button
         className="w-full"

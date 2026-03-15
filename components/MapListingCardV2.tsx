@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewLabel } from "@/lib/reviews";
+import { computeAllInPricing, computeGuestTotalMajorFromHostNet } from "@/lib/pricing";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 
@@ -195,7 +196,7 @@ const CarIcon = () => (
 
 export default function MapListingCardV2({
   listing,
-  staySummary: _staySummary,
+  staySummary,
   active = false,
   onHover,
   onLeave,
@@ -203,10 +204,27 @@ export default function MapListingCardV2({
 }: MapListingCardProps) {
   const bookingUnit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
   const unitLabel = bookingUnit === "hourly" ? "hour" : "night";
-  const basePrice =
+  const hostBasePrice =
     bookingUnit === "hourly"
       ? toNumber(listing.pricePerHour) ?? toNumber(listing.price)
       : toNumber(listing.pricePerNight) ?? toNumber(listing.price);
+  const guestUnitPrice =
+    hostBasePrice != null
+      ? computeGuestTotalMajorFromHostNet(hostBasePrice, {
+          nights: 1,
+          isFirstCompletedBooking: false,
+        })
+      : null;
+  const stayUnits = staySummary?.units ?? 0;
+  const stayTotal =
+    hostBasePrice != null && stayUnits > 0
+      ? computeAllInPricing({
+          hostNetTotalPence: Math.round(hostBasePrice * stayUnits * 100),
+          nights: bookingUnit === "hourly" ? 1 : stayUnits,
+          isFirstCompletedBooking: false,
+        }).guest_total_pence / 100
+      : null;
+  const showStayTotal = stayTotal != null;
 
   const tag = buildTag(listing);
   const metaLine = tag;
@@ -285,12 +303,26 @@ export default function MapListingCardV2({
             </div>
           )}
 
-          {basePrice != null && (
+          {guestUnitPrice != null && (
             <div className="mt-auto self-end text-right">
-              <div className="text-2xl font-semibold tracking-tight text-neutral-900">
-                {formatCurrency(basePrice)} / {unitLabel}
-              </div>
-              <div className="text-sm text-neutral-500">All fees included</div>
+              {showStayTotal && stayTotal != null ? (
+                <>
+                  <div className="text-2xl font-semibold tracking-tight text-neutral-900">
+                    {formatCurrency(stayTotal)}
+                  </div>
+                  <div className="text-sm text-neutral-500">
+                    {stayUnits} {unitLabel}
+                    {stayUnits === 1 ? "" : "s"}, {formatCurrency(guestUnitPrice)} / {unitLabel}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-2xl font-semibold tracking-tight text-neutral-900">
+                    {formatCurrency(guestUnitPrice)} / {unitLabel}
+                  </div>
+                  <div className="text-sm text-neutral-500">All fees included</div>
+                </>
+              )}
             </div>
           )}
         </div>

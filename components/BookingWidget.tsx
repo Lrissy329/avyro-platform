@@ -366,7 +366,9 @@ export default function BookingWidget({
       : addDaysToDateInput(quoteCheckIn, 1);
 
     const controller = new AbortController();
+    let cancelled = false;
     const fetchQuote = async () => {
+      if (cancelled) return;
       setQuoteLoading(true);
       setQuoteError(null);
       try {
@@ -380,22 +382,38 @@ export default function BookingWidget({
           }),
           signal: controller.signal,
         });
+        if (cancelled) return;
         const payload = await resp.json();
         if (!resp.ok) {
           throw new Error(payload?.error ?? "Failed to fetch quote.");
         }
+        if (cancelled) return;
         setQuote(payload);
       } catch (e: any) {
-        if (e?.name === "AbortError") return;
+        const aborted =
+          e?.name === "AbortError" ||
+          controller.signal.aborted ||
+          (typeof e?.message === "string" && e.message.toLowerCase().includes("aborted"));
+        if (aborted || cancelled) return;
         setQuote(null);
         setQuoteError(e?.message ?? "Failed to fetch quote.");
       } finally {
+        if (cancelled) return;
         setQuoteLoading(false);
       }
     };
 
     fetchQuote();
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+      if (!controller.signal.aborted) {
+        try {
+          controller.abort();
+        } catch {
+          // Some environments throw on redundant/unsupported abort; ignore cleanup failures.
+        }
+      }
+    };
   }, [checkInDate, checkOutDate, isHourlyStay, listingId]);
 
   const fallbackPricing = useMemo(

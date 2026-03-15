@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabaseClient";
 
 const MapView = dynamic(() => import("@/components/map"), { ssr: false });
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
+const UBER_MAP_STYLE = "mapbox://styles/mapbox/streets-v12";
 const __DEV__ = process.env.NODE_ENV !== "production";
 
 // ---------------- Coordinates helpers (unchanged) ----------------
@@ -131,6 +132,7 @@ function formatSearchLocation(raw: unknown): string {
 type SearchListing = {
   id: string;
   title: string;
+  description?: string | null;
   airportCode?: string;
   location?: string;
   locationRaw?: string;
@@ -587,6 +589,7 @@ export default function SearchPage() {
           return {
             id,
             title: l.title ?? l.name ?? "Listing",
+            description: typeof l.description === "string" ? l.description : null,
             airportCode: airport_code,
             location: locationLabel,
             locationFallback: locationLabel,
@@ -1038,7 +1041,8 @@ export default function SearchPage() {
               <div className="relative h-full w-full">
                 <MapView
                   mapboxAccessToken={MAPBOX_TOKEN}
-                  mapStyle="mapbox://styles/mapbox/navigation-day-v1"
+                  mapStyle={UBER_MAP_STYLE}
+                  theme="uber"
                   longitude={
                     airportCoords[defaultAirportOption.code]
                       ? airportCoords[defaultAirportOption.code][0]
@@ -1066,7 +1070,8 @@ export default function SearchPage() {
               <div className="h-full w-full">
                 <MapView
                   mapboxAccessToken={MAPBOX_TOKEN}
-                  mapStyle="mapbox://styles/mapbox/navigation-day-v1"
+                  mapStyle={UBER_MAP_STYLE}
+                  theme="uber"
                   longitude={safeCenter.lng}
                   latitude={safeCenter.lat}
                   zoom={11}

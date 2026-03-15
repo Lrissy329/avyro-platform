@@ -11,6 +11,7 @@ type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 type MapListing = {
   id: string;
   title?: string;
+  description?: string | null;
   location?: string;
   locationFallback?: string;
   coordsMissing?: boolean;
@@ -123,6 +124,14 @@ const buildTag = (listing: MapListing) => {
   return "Crew-ready";
 };
 
+const buildSummary = (listing: MapListing, transportText: string | null) => {
+  const raw = typeof listing.description === "string" ? listing.description.trim() : "";
+  if (raw) return raw;
+  const airport = listing.airportCode ? `near ${listing.airportCode}` : "near the airport";
+  const transport = transportText ? transportText.toLowerCase() : "fast transfer links";
+  return `Crew-ready stay ${airport} with ${transport}. Ideal for overnight rotations and reliable rest between shifts.`;
+};
+
 const buildTitle = (listing: MapListing) => {
   const bedCount = listing.beds ?? listing.bedrooms ?? null;
   const propertyType = normaliseType(listing.type);
@@ -227,7 +236,7 @@ export default function MapListingCardV2({
   const showStayTotal = stayTotal != null;
 
   const tag = buildTag(listing);
-  const metaLine = tag;
+  const typeLabel = normaliseType(listing.type);
 
   const titleLine = buildTitle(listing);
   const factsLine = buildFacts(listing);
@@ -243,6 +252,15 @@ export default function MapListingCardV2({
   const transportText = transportMinutes
     ? `${transportInfo.mode} · ${transportMinutes} to ${listing.airportCode ?? "airport"}`
     : null;
+  const summaryText = buildSummary(listing, transportText);
+  const locationText = listing.coordsMissing
+    ? listing.locationFallback ?? listing.location ?? ""
+    : listing.location ?? listing.locationFallback ?? "";
+  const showStayTotalDetails = showStayTotal && stayTotal != null;
+  const unitLine =
+    guestUnitPrice != null
+      ? `${formatCurrency(guestUnitPrice)} per ${unitLabel}`
+      : null;
 
   return (
     <Link
@@ -253,8 +271,8 @@ export default function MapListingCardV2({
       onClick={() => onSelect?.()}
     >
       <article
-        className={`grid min-h-[180px] grid-cols-[40%_1fr] gap-4 rounded-[24px] border border-neutral-200 bg-white p-3 shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md sm:grid-cols-[240px_1fr] md:min-h-[200px] md:p-4 lg:min-h-[210px] lg:grid-cols-[280px_1fr] ${
-          active ? "border-neutral-300 shadow-md" : ""
+        className={`grid min-h-[190px] grid-cols-[42%_1fr] gap-4 rounded-[24px] border border-neutral-200 bg-white p-3 shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md sm:grid-cols-[220px_1fr] md:min-h-[210px] md:p-4 lg:grid-cols-[240px_1fr_190px] ${
+          active ? "border-neutral-400 shadow-md" : ""
         }`}
       >
         <div className="relative h-full w-full overflow-hidden rounded-2xl bg-neutral-100">
@@ -263,69 +281,90 @@ export default function MapListingCardV2({
             alt={listing.title ?? "Listing image"}
             fill
             className="object-cover"
-            sizes="(min-width: 1024px) 280px, (min-width: 640px) 240px, 40vw"
+            sizes="(min-width: 1024px) 240px, (min-width: 640px) 220px, 42vw"
           />
           <span className="absolute bottom-3 left-3 rounded-full bg-black px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#FEDD02]">
             {badgeText}
           </span>
+          <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-base text-neutral-700 shadow-sm">
+            ♡
+          </span>
         </div>
 
-        <div className="flex h-full flex-col space-y-2 md:space-y-3">
-          {metaLine && <div className="text-sm text-neutral-500">{metaLine}</div>}
-
+        <div className="flex h-full flex-col gap-2 md:gap-2.5">
           <div>
-            <h3 className="text-2xl font-semibold leading-tight text-neutral-900">
+            <h3 className="text-xl font-semibold leading-tight text-neutral-900 underline underline-offset-2">
               {titleLine}
             </h3>
-            {factsLine && <div className="mt-1 text-base text-neutral-600">{factsLine}</div>}
+            {locationText && <div className="mt-1 text-sm text-neutral-600">{locationText}</div>}
           </div>
 
-          {reviewOverall != null && reviewTotal != null && reviewTotal > 0 && (
-            <div className="text-base text-neutral-700">
-              <span className="font-semibold text-neutral-900">
-                {reviewOverall.toFixed(1)}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-600">
+            {listing.airportCode && (
+              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1 font-semibold">
+                {listing.airportCode}
               </span>
-              {reviewLabel && (
-                <>
-                  <span className="mx-2 text-neutral-400">·</span>
-                  <span>{reviewLabel}</span>
-                </>
-              )}
-              <span className="mx-2 text-neutral-400">·</span>
-              <span>{reviewTotal} reviews</span>
-            </div>
-          )}
+            )}
+            {typeLabel && (
+              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1">
+                {typeLabel}
+              </span>
+            )}
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 font-medium text-emerald-800">
+              {tag}
+            </span>
+            {factsLine && <span>{factsLine}</span>}
+          </div>
 
-          {transportText && (
-            <div className="inline-flex items-center gap-2 text-sm text-neutral-600">
-              {transportInfo?.mode === "Public transport" ? <BusIcon /> : <CarIcon />}
-              <span>{transportText}</span>
-            </div>
-          )}
+          <p className="line-clamp-3 text-sm leading-5 text-neutral-700">{summaryText}</p>
 
+          <div className="space-y-1 text-sm">
+            {listing.freeCancellation && <div className="font-medium text-emerald-700">Fully refundable</div>}
+            <div className="text-neutral-600">All fees included in shown price</div>
+          </div>
+
+          <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-600">
+            {transportText && (
+              <span className="inline-flex items-center gap-1.5">
+                {transportInfo?.mode === "Public transport" ? <BusIcon /> : <CarIcon />}
+                {transportText}
+              </span>
+            )}
+            {reviewOverall != null && reviewTotal != null && reviewTotal > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-semibold text-neutral-900">{reviewOverall.toFixed(1)}</span>
+                <span>· {reviewLabel ?? "Rated stay"}</span>
+                <span>· {reviewTotal} reviews</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-col justify-end text-right lg:border-l lg:border-neutral-100 lg:pl-4">
           {guestUnitPrice != null && (
-            <div className="mt-auto self-end text-right">
-              {showStayTotal && stayTotal != null ? (
+            <>
+              <div className="text-3xl font-semibold tracking-tight text-neutral-900">
+                {showStayTotalDetails ? formatCurrency(stayTotal) : formatCurrency(guestUnitPrice)}
+              </div>
+              {showStayTotalDetails ? (
                 <>
-                  <div className="text-2xl font-semibold tracking-tight text-neutral-900">
-                    {formatCurrency(stayTotal)}
+                  <div className="text-sm text-neutral-600">
+                    for {stayUnits} {unitLabel}
+                    {stayUnits === 1 ? "" : "s"}
                   </div>
-                  <div className="text-sm text-neutral-500">
-                    {stayUnits} {unitLabel}
-                    {stayUnits === 1 ? "" : "s"}, {formatCurrency(guestUnitPrice)} / {unitLabel}
-                  </div>
+                  {unitLine && <div className="text-sm text-neutral-600">{unitLine}</div>}
                 </>
               ) : (
-                <>
-                  <div className="text-2xl font-semibold tracking-tight text-neutral-900">
-                    {formatCurrency(guestUnitPrice)} / {unitLabel}
-                  </div>
-                  <div className="text-sm text-neutral-500">All fees included</div>
-                </>
+                <div className="text-sm text-neutral-600">per {unitLabel}</div>
               )}
-            </div>
+              <div className="mt-1 text-xs text-neutral-500">includes taxes & fees</div>
+            </>
+          )}
+          {guestUnitPrice == null && (
+            <div className="text-sm text-neutral-500">Price unavailable</div>
           )}
         </div>
+
       </article>
     </Link>
   );

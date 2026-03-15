@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import type { LinkProps } from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewLabel } from "@/lib/reviews";
 import { computeAllInPricing, computeGuestTotalMajorFromHostNet } from "@/lib/pricing";
@@ -49,6 +50,7 @@ type MapListing = {
 
 type MapListingCardProps = {
   listing: MapListing;
+  listingHref?: LinkProps["href"];
   staySummary?: StaySummary;
   active?: boolean;
   onHover?: () => void;
@@ -205,6 +207,7 @@ const CarIcon = () => (
 
 export default function MapListingCardV2({
   listing,
+  listingHref,
   staySummary,
   active = false,
   onHover,
@@ -261,10 +264,11 @@ export default function MapListingCardV2({
     guestUnitPrice != null
       ? `${formatCurrency(guestUnitPrice)} per ${unitLabel}`
       : null;
+  const href = listingHref ?? (listing.id ? `/listing/${listing.id}` : "#");
 
   return (
     <Link
-      href={listing.id ? `/listing/${listing.id}` : "#"}
+      href={href}
       className="block no-underline hover:no-underline"
       onMouseEnter={onHover}
       onMouseLeave={onLeave}

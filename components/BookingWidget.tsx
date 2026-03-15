@@ -73,6 +73,23 @@ const parseDateInputValue = (value: string) => {
   if (!year || !month || !day) return null;
   return new Date(year, month - 1, day);
 };
+const normalizeDateParam = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const datePrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? "";
+  if (datePrefix && parseDateInputValue(datePrefix)) return datePrefix;
+  const parsed = new Date(trimmed);
+  if (!Number.isFinite(parsed.getTime())) return "";
+  return toDateInputValue(parsed);
+};
+const normalizeTimeParam = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  const match = trimmed.match(/^([01]\d|2[0-3]):([0-5]\d)/);
+  if (!match) return "";
+  return `${match[1]}:${match[2]}`;
+};
 const parseISODate = (value: string) => new Date(`${value}T00:00:00`);
 const minDateValue = (a: Date, b: Date) => (a.getTime() <= b.getTime() ? a : b);
 
@@ -163,6 +180,7 @@ export default function BookingWidget({
     [resolvedStayType]
   );
   const isHourlyStay = stayTypeConfig.isHourly;
+  const didHydrateFromQueryRef = useRef(false);
 
   const toUtcIso = (dateStr: string, timeStr: string) => {
     const [year, month, day] = dateStr.split("-").map(Number);
@@ -170,6 +188,42 @@ export default function BookingWidget({
     const local = new Date(year, (month ?? 1) - 1, day ?? 1, hours ?? 0, minutes ?? 0);
     return local.toISOString();
   };
+
+  useEffect(() => {
+    if (!router.isReady || didHydrateFromQueryRef.current) return;
+    const nextCheckIn = normalizeDateParam(router.query.checkIn);
+    const nextCheckOut = normalizeDateParam(router.query.checkOut);
+    const nextCheckInTime = normalizeTimeParam(router.query.checkInTime);
+    const nextCheckOutTime = normalizeTimeParam(router.query.checkOutTime);
+
+    if (!nextCheckIn && !nextCheckOut && !nextCheckInTime && !nextCheckOutTime) {
+      didHydrateFromQueryRef.current = true;
+      return;
+    }
+
+    if (nextCheckIn) setCheckInDate(nextCheckIn);
+    if (nextCheckOut) setCheckOutDate(nextCheckOut);
+    if (nextCheckInTime) setCheckInTimeLocal(nextCheckInTime);
+    if (nextCheckOutTime) setCheckOutTimeLocal(nextCheckOutTime);
+
+    if (!isHourlyStay && onNightlyRangeChange && nextCheckIn && nextCheckOut) {
+      const from = parseDateInputValue(nextCheckIn);
+      const to = parseDateInputValue(nextCheckOut);
+      if (from && to && to > from) {
+        onNightlyRangeChange({ from, to });
+      }
+    }
+
+    didHydrateFromQueryRef.current = true;
+  }, [
+    router.isReady,
+    router.query.checkIn,
+    router.query.checkOut,
+    router.query.checkInTime,
+    router.query.checkOutTime,
+    isHourlyStay,
+    onNightlyRangeChange,
+  ]);
 
   useEffect(() => {
     if (stayType !== "day_use") return;

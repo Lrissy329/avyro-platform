@@ -320,6 +320,41 @@ export default function SearchPage() {
   }, [stayWindow]);
 
   const hasTimeSelection = Boolean(q.checkInTime || q.checkOutTime);
+  const listingDetailQuery = useMemo(() => {
+    const raw: Record<string, string> = {
+      location: q.location,
+      airport: q.airport || airportCode,
+      checkIn: q.checkIn,
+      checkOut: q.checkOut,
+      checkInTime: q.checkInTime,
+      checkOutTime: q.checkOutTime,
+      bookingUnit: q.bookingUnit,
+      adults: q.adults,
+      children: q.children,
+      infants: q.infants,
+      pets: q.pets,
+      guests: q.guests,
+    };
+
+    return Object.fromEntries(
+      Object.entries(raw).filter(([, value]) => typeof value === "string" && value.trim().length > 0)
+    );
+  }, [
+    q.location,
+    q.airport,
+    q.checkIn,
+    q.checkOut,
+    q.checkInTime,
+    q.checkOutTime,
+    q.bookingUnit,
+    q.adults,
+    q.children,
+    q.infants,
+    q.pets,
+    q.guests,
+    airportCode,
+  ]);
+
   const mapListings = useMemo(() => {
     return listings.map((listing) => {
       const bookingUnit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
@@ -1016,6 +1051,10 @@ export default function SearchPage() {
                 >
                   <MapListingCard
                     listing={listing}
+                    listingHref={{
+                      pathname: `/listing/${listing.id}`,
+                      query: listingDetailQuery,
+                    }}
                     staySummary={
                       listing.booking_unit === "hourly"
                         ? hasTimeSelection && stayHours > 0

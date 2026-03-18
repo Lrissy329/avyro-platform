@@ -1,442 +1,443 @@
 // pages/index.tsx
-// Home (Airbnb x Uber style) — sticky search, pill filters, card grid
-// Note: we avoid next/image for Supabase URLs
+// Home — refined hero, search-first experience, category rows
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/router";
-import { supabase } from "@/lib/supabaseClient";
-import { AppHeader } from "@/components/AppHeader";
-import HomeListingCard from "@/components/HomeListingCard";
 import SearchBar from "@/components/SearchBar";
-import { formatReviewLabel } from "@/lib/reviews";
-import { Listing } from "@/types/Listing";
 
-// --- Helpers ---------------------------------------------------------------
-const AIRPORTS = [
-  { code: "", label: "Any airport" },
-  { code: "STN", label: "London Stansted (STN)" },
-  { code: "LTN", label: "London Luton (LTN)" },
-  { code: "LHR", label: "London Heathrow (LHR)" },
-  { code: "LGW", label: "London Gatwick (LGW)" },
-];
+const AIRPORT_MARKETPLACE_STAYS = [
+  {
+    id: "stn-quiet-1bed",
+    title: "Quiet 1-bed near Stansted",
+    description: "Reliable base for early starts and short turnarounds.",
+    minutesToAirport: 10,
+    airportCode: "STN",
+    trustBadge: "Crew-ready",
+    rating: 4.9,
+    reviews: 23,
+    pricePerNight: 65,
+    imageUrl: "/placeholder.jpg",
+    href: "/search?airport=STN",
+  },
+  {
+    id: "lhr-modern-studio",
+    title: "Modern studio near Heathrow",
+    description: "Calm, practical stay with fast terminal access.",
+    minutesToAirport: 14,
+    airportCode: "LHR",
+    trustBadge: "Verified",
+    rating: 4.8,
+    reviews: 31,
+    pricePerNight: 79,
+    imageUrl: "/placeholder.jpg",
+    href: "/search?airport=LHR",
+  },
+  {
+    id: "lgw-crew-flat",
+    title: "Crew flat near Gatwick",
+    description: "Professional-ready accommodation for repeat rotations.",
+    minutesToAirport: 12,
+    airportCode: "LGW",
+    trustBadge: "Crew-ready",
+    rating: 4.9,
+    reviews: 18,
+    pricePerNight: 72,
+    imageUrl: "/placeholder.jpg",
+    href: "/search?airport=LGW",
+  },
+] as const;
 
-const AIRPORT_SUGGESTIONS = [
-  { code: "NEARBY", label: "Nearby", subtitle: "Find what’s around you", icon: "📍" },
-  { code: "STN", label: "London Stansted, England", subtitle: "Good for quick getaways", icon: "🛫" },
-  { code: "LTN", label: "London Luton, England", subtitle: "Near you", icon: "🛫" },
-  { code: "LHR", label: "Paris, France (via LHR)", subtitle: "For sights like Eiffel Tower", icon: "🗼" },
-  { code: "LGW", label: "Chipping Norton, England", subtitle: "Near you", icon: "🏡" },
-];
-
-type Filters = {
-  airport: string;
-  roomType: string; // "entire place" | "private room" | ""
+type DividerIconProps = {
+  className?: string;
 };
 
-function coerceAirport(x: any) {
-  return (x?.airport_code ?? x?.airportCode ?? "").toString();
-}
-function coerceType(x: any) {
-  return (x?.type ?? x?.listing_type ?? "").toString();
-}
+const DividerPinIcon = ({ className }: DividerIconProps) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+    className={className}
+  >
+    <path d="M12 22s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z" />
+    <circle cx="12" cy="10" r="2.8" />
+  </svg>
+);
 
-const toNumber = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-};
+const DividerShieldIcon = ({ className }: DividerIconProps) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+    className={className}
+  >
+    <path d="M12 3 5 6v6c0 5 3.4 8.1 7 9 3.6-.9 7-4 7-9V6l-7-3Z" />
+    <path d="m9.5 12 1.8 1.8 3.4-3.4" />
+  </svg>
+);
 
-const safeMinutes = (value: unknown): number | null => {
-  const n = toNumber(value);
-  if (n == null || !Number.isFinite(n)) return null;
-  return Math.round(n);
-};
-
-const normaliseTypeLabel = (value: unknown): string | null => {
-  if (typeof value !== "string" || !value.trim()) return null;
-  const lower = value.replace(/_/g, " ").toLowerCase();
-  if (lower.includes("entire")) return "Entire place";
-  if (lower.includes("private")) return "Private room";
-  if (lower.includes("shared")) return "Private room";
-  return value.replace(/_/g, " ");
-};
-
-const pickImageUrl = (listing: any, signedUrls: Record<string, string>): string => {
-  const candidates = [
-    signedUrls[listing.id],
-    listing.image_url,
-    listing.imageUrl,
-    listing.thumbnail,
-    Array.isArray(listing.photos) ? listing.photos[0] : listing.photos,
-  ].filter((src) => typeof src === "string" && src.length > 0) as string[];
-
-  return candidates[0] ?? "/placeholder.jpg";
-};
-
-const buildMetaLine = (listing: any): string | null => {
-  const airport = coerceAirport(listing);
-  const minutes =
-    safeMinutes(listing.drive_minutes_offpeak) ??
-    safeMinutes(listing.driveMinutesToAirport) ??
-    safeMinutes(listing.travelMinutesMin) ??
-    safeMinutes(listing.publicTransportMin) ??
-    safeMinutes(listing.taxiMin);
-  const typeLabel = normaliseTypeLabel(
-    listing.listing_type ?? listing.type ?? listing.roomType ?? listing.listingType
-  );
-
-  const parts: string[] = [];
-  if (minutes != null && airport) parts.push(`${minutes} min to ${airport}`);
-  else if (airport) parts.push(airport);
-  if (typeLabel) parts.push(typeLabel);
-
-  return parts.length ? parts.join(" · ") : null;
-};
-
-const getBadgeText = (listing: any): string => {
-  const unit = listing.booking_unit ?? listing.bookingUnit;
-  const rental = listing.rental_type ?? listing.rentalType;
-  if (unit === "hourly" || rental === "day_use" || rental === "split_rest") return "DAY-USE";
-  return "OVERNIGHT";
-};
+const DividerPriceIcon = ({ className }: DividerIconProps) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+    className={className}
+  >
+    <rect x="3" y="6" width="18" height="12" rx="2.5" />
+    <path d="M7 12h10" />
+    <path d="M12 9v6" />
+  </svg>
+);
 
 export default function Home() {
   const router = useRouter();
 
-  // Search & filter state
-  const [filters, setFilters] = useState<Filters>({
-    airport: "",
-    roomType: "",
-  });
-  const airportChoices = useMemo(() => {
-    const q = "";
-    if (!q) return AIRPORT_SUGGESTIONS;
-    return [
-      ...AIRPORT_SUGGESTIONS.filter(x => x.code === "NEARBY"),
-      ...AIRPORTS
-        .filter((a) => (a.code && (a.code.toLowerCase().includes(q) || a.label.toLowerCase().includes(q))))
-        .map((a) => ({ code: a.code, label: a.label, subtitle: "", icon: "🛫" })),
-    ];
-  }, []);
-
-  // Data state
-  const [listings, setListings] = useState<Listing[] | any[]>([]);
-  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [sessionUser, setSessionUser] = useState<any>(null);
-  const [profile, setProfile] = useState<{
-    full_name: string | null;
-    avatar_url: string | null;
-    role_host: boolean;
-    role_guest: boolean;
-  } | null>(null);
-  const [notifications, setNotifications] = useState(0);
-
-  // Fetch listings
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase.from("listings").select("*");
-      if (error) {
-        console.error("Failed to fetch listings", error.message);
-        setLoading(false);
-        return;
-      }
-      setListings(data || []);
-
-      // Resolve first-photo URL for each listing
-      const urlMap: Record<string, string> = {};
-      await Promise.all(
-        (data || []).map(async (listing: any) => {
-          const first = Array.isArray(listing.photos) ? listing.photos[0] : listing.photos;
-          if (!first) return;
-          if (typeof first === "string" && first.startsWith("http")) {
-            urlMap[listing.id] = first;
-            return;
-          }
-          // Treat as Storage path
-          if (typeof first === "string") {
-            const { data: pub } = supabase.storage.from("listing-photos").getPublicUrl(first);
-            if (pub?.publicUrl) urlMap[listing.id] = pub.publicUrl;
-          }
-        })
-      );
-      setSignedUrls(urlMap);
-      setLoading(false);
-    })();
-  }, []);
-
-  // Apply filters on the fly
-  const filtered = useMemo(() => {
-    return (listings || []).filter((l: any) => {
-      const airport = coerceAirport(l);
-      const type = coerceType(l);
-
-      const airportOk = !filters.airport || airport === filters.airport;
-      const typeOk = !filters.roomType || type === filters.roomType;
-      return airportOk && typeOk;
-    });
-  }, [listings, filters]);
-
-  // --- UI Handlers ---------------------------------------------------------
-  const onAirportChange = (e: React.ChangeEvent<HTMLSelectElement>) =>
-    setFilters((f) => ({ ...f, airport: e.target.value }));
-  const onTypeClick = (val: string) =>
-    setFilters((f) => ({ ...f, roomType: f.roomType === val ? "" : val }));
-
-  // New: handle search from SearchBar -> navigate to /search with query params
-  const onSearchBar = (payload: any) => {
-    const params = new URLSearchParams();
-
-    // Location / airport code parsing
-    const locRaw = String(payload?.location || "").trim();
-    if (locRaw) params.set("location", locRaw);
-    const reParens = locRaw.match(/\(([A-Z]{3})\)/);      // e.g., "London Heathrow (LHR)"
-    const reCode = locRaw.match(/\b(STN|LTN|LHR|LGW)\b/); // direct IATA code typed
-    const airport = reParens?.[1] || reCode?.[1] || "";
-    if (airport) params.set("airport", airport);
-
-    // Dates -> YYYY-MM-DD (timezone-safe)
-    const fmt = (d?: Date | null) =>
-      d ? new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10) : null;
-    const checkIn = fmt(payload?.checkIn ?? payload?.dateRange?.from ?? null);
-    const checkOut = fmt(payload?.checkOut ?? payload?.dateRange?.to ?? null);
-    if (checkIn) params.set("checkIn", checkIn);
-    if (checkOut) params.set("checkOut", checkOut);
-    if (payload?.checkInTime) params.set("checkInTime", payload.checkInTime);
-    if (payload?.checkOutTime) params.set("checkOutTime", payload.checkOutTime);
-    if (payload?.bookingUnit) params.set("bookingUnit", payload.bookingUnit);
-
-    // Guests
-    const g = payload?.guests || {};
-    const adults = Number(g.adults || 0);
-    const children = Number(g.children || 0);
-    const infants = Number(g.infants || 0);
-    const pets = Number(g.pets || 0);
-    const guests = adults + children; // common convention excludes infants/pets
-    params.set("adults", String(adults));
-    params.set("children", String(children));
-    params.set("infants", String(infants));
-    params.set("pets", String(pets));
-    if (guests > 0) params.set("guests", String(guests));
-
-    // Navigate to /search with all params
-    router.push(`/search?${params.toString()}`);
-  };
+  const dividerRef = useRef<HTMLElement | null>(null);
+  const [dividerVisible, setDividerVisible] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user ?? null;
-      setSessionUser(user);
-      if (user) {
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select("full_name, avatar_url, role_host, role_guest")
-          .eq("id", user.id)
-          .single();
+    const node = dividerRef.current;
+    if (!node || dividerVisible) return;
 
-        const fallbackAvatar =
-          user.user_metadata?.avatar_url ??
-          user.user_metadata?.picture ??
-          null;
+    if (typeof IntersectionObserver === "undefined") {
+      setDividerVisible(true);
+      return;
+    }
 
-        setProfile(
-          profileData
-            ? {
-                full_name: profileData.full_name ?? user.email ?? null,
-                avatar_url: profileData.avatar_url ?? fallbackAvatar,
-                role_host: Boolean(profileData.role_host),
-                role_guest: Boolean(profileData.role_guest),
-              }
-            : {
-                full_name: user.email ?? null,
-                avatar_url: fallbackAvatar,
-                role_host: false,
-                role_guest: false,
-              }
-        );
-      } else {
-        setProfile(null);
-        setNotifications(0);
-      }
-    })();
-  }, []);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        setDividerVisible(true);
+        observer.disconnect();
+      },
+      { threshold: 0.25 }
+    );
 
-  useEffect(() => {
-    if (!sessionUser) return;
-
-    const fetchNotifications = async () => {
-      try {
-        if (profile?.role_host) {
-          const { count, error } = await supabase
-            .from("bookings")
-            .select("id", { count: "exact", head: true })
-            .eq("host_id", sessionUser.id)
-            .eq("status", "pending");
-          if (!error) setNotifications(count ?? 0);
-        } else if (profile?.role_guest) {
-          const { count, error } = await supabase
-            .from("bookings")
-            .select("id", { count: "exact", head: true })
-            .eq("guest_id", sessionUser.id)
-            .eq("status", "awaiting_payment");
-          if (!error) setNotifications(count ?? 0);
-        } else {
-          setNotifications(0);
-        }
-      } catch (err) {
-        console.error("Failed to fetch notifications", err);
-      }
-    };
-
-    fetchNotifications();
-  }, [sessionUser, profile]);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [dividerVisible]);
 
   // --- Render --------------------------------------------------------------
   return (
     <main className="min-h-screen bg-white text-gray-900">
-      <AppHeader
-        notificationCount={notifications}
-        initialProfile={profile}
-        onSignOut={async () => {
-          await supabase.auth.signOut();
-          router.push("/login");
-        }}
-      />
+      <section className="bg-white">
+        <div className="mx-auto max-w-7xl px-6 pb-16 pt-12 lg:px-8 lg:pb-24 lg:pt-20">
+          <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[46%_54%] lg:gap-16">
+            <div className="relative z-20">
+              <p className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm font-medium text-slate-600">
+                <span aria-hidden>✈</span>
+                For professionals near airports
+              </p>
 
-      <section className="border-b border-[#0B0D10] bg-[#0B0D10] text-white">
-        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-300">
-              Avyro
-            </p>
-            <h1 className="mt-4 text-4xl font-semibold leading-tight text-white md:text-5xl lg:text-6xl">
-              Professional stays,
-              <span className="block">
-                <span className="line-through">without</span> ambiguity.
-              </span>
-            </h1>
-            <p className="mt-4 text-sm text-slate-200 md:text-base">
-              Nightly and day‑use accommodation built for operational schedules.
-            </p>
-          </div>
-          <div className="flex justify-center lg:justify-end">
-            <div className="w-full max-w-[520px] overflow-hidden rounded-3xl border border-white/10 bg-black/20 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
-              <img
-                src="/hero-avyro.png"
-                alt="Pilot arriving at a professional stay"
-                className="h-full w-full object-cover"
-              />
+              <h1 className="mt-5 max-w-[11ch] text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl lg:leading-[1.02]">
+                Find{" "}
+                <span className="relative inline-block">
+                  <span className="relative z-[1]">reliable</span>
+                  <span className="absolute bottom-1 left-0 z-0 h-2 w-full rounded bg-amber-200/65" />
+                </span>{" "}
+                stays near your workplace
+              </h1>
+
+              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-600 lg:text-xl">
+                Quiet, reliable accommodation near airports and transport links — designed for
+                professionals, not tourists.
+              </p>
+
+              <div className="relative z-20 mt-8 lg:w-[calc(100%+22rem)] xl:w-[calc(100%+24rem)]">
+                <SearchBar onSearch={() => undefined} align="left" />
+              </div>
+
+              <ul className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 text-sm text-slate-600 sm:flex sm:flex-wrap">
+                {[
+                  "Near major airports",
+                  "Verified hosts",
+                  "Flexible stays",
+                  "Transparent pricing",
+                ].map((item) => (
+                  <li key={item} className="inline-flex items-center gap-2">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-100 text-[11px] font-bold text-slate-700">
+                      ✓
+                    </span>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+
+              <p className="mt-6 text-sm text-slate-600">
+                Hosting near an airport?{" "}
+                <button
+                  type="button"
+                  onClick={() => router.push("/host/create-listing")}
+                  className="font-semibold text-slate-900 transition hover:underline"
+                >
+                  Become a host
+                </button>
+              </p>
+            </div>
+
+            <div>
+              <div className="relative min-h-[300px] md:min-h-[420px] lg:min-h-[560px]">
+                <Image
+                  src="/Hero-Image-2.png"
+                  alt="Professional walking toward accommodation near airport transport links"
+                  fill
+                  sizes="(min-width: 1024px) 54vw, 100vw"
+                  className="absolute inset-0 h-full w-full object-cover"
+                  priority
+                />
+
+                <div className="absolute right-6 top-6 z-20 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur lg:right-8 lg:top-8">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    10 min to Stansted
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-slate-900">Quiet stay · Verified host</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <div className="relative z-10 mx-auto -mt-8 w-full max-w-5xl px-4 pb-6">
-        <SearchBar onSearch={onSearchBar} />
-      </div>
+      <section
+        ref={dividerRef}
+        className={`border-b border-t border-white/5 bg-[#0F172A] py-12 transition-all duration-[600ms] ease-out md:py-16 ${
+          dividerVisible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
+        }`}
+      >
+        <div className="mx-auto max-w-7xl px-6 lg:px-8">
+          <div className="mx-auto max-w-4xl text-center">
+            <div className="mx-auto mb-6 h-px w-24 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            <h2 className="relative text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+              Built for professionals, not tourists
+            </h2>
+            <p className="mx-auto mt-4 max-w-3xl text-base leading-7 text-slate-300 sm:text-lg">
+              Reliable stays near airports, built around real crew schedules — not holiday bookings.
+            </p>
+          </div>
 
-      <section className="mx-auto max-w-6xl px-4 py-12">
-        <div className="grid gap-6 md:grid-cols-3">
-          {[
-            {
-              title: "Choose stay type",
-              body: "Overnight or day‑use, aligned to your schedule.",
-            },
-            {
-              title: "Enforced booking rules",
-              body: "Listings only accept the mode the host sets.",
-            },
-            {
-              title: "Built for repeat crews",
-              body: "Clear pricing and reliable availability every trip.",
-            },
-          ].map((item) => (
-            <div
-              key={item.title}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+          <div className="mx-auto mt-10 grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+            {[
+              { label: "Near major airports", Icon: DividerPinIcon },
+              { label: "Verified hosts", Icon: DividerShieldIcon },
+              { label: "Transparent pricing", Icon: DividerPriceIcon },
+            ].map(({ label, Icon }) => (
+              <div
+                key={label}
+                className="group flex min-h-[58px] items-center justify-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.02] px-5 py-4 transition duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.04]"
+              >
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.05] text-amber-300/75 transition-colors duration-200 group-hover:bg-white/[0.08] group-hover:text-amber-200">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="text-sm font-medium text-slate-300 transition-colors duration-200 group-hover:text-white">
+                  {label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 pb-16 pt-12 lg:pb-20">
+        <div className="mb-10 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+              Stays near major airports
+            </h2>
+            <p className="mt-2 text-sm text-slate-600 sm:text-base">
+              Reliable accommodation within easy reach of the terminal.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/search")}
+            className="shrink-0 text-sm font-semibold text-slate-700 transition hover:text-slate-900"
+          >
+            View all stays →
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+          {AIRPORT_MARKETPLACE_STAYS.map((stay) => (
+            <button
+              key={stay.id}
+              type="button"
+              onClick={() => router.push(stay.href)}
+              className="group mx-auto w-full max-w-[360px] appearance-none border-0 bg-transparent p-0 text-left"
             >
-              <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-              <p className="mt-2 text-sm text-slate-600">{item.body}</p>
-            </div>
+              <div className="relative h-[190px] overflow-hidden rounded-xl">
+                <Image
+                  src={stay.imageUrl}
+                  alt={stay.title}
+                  fill
+                  sizes="(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw"
+                  className="object-cover"
+                />
+                <span className="absolute left-3 top-3 rounded-full bg-slate-900/85 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur-[4px]">
+                  {stay.minutesToAirport} min to {stay.airportCode}
+                </span>
+              </div>
+
+              <div className="mt-3 space-y-1.5">
+                <h3 className="text-base font-semibold leading-[1.3] text-slate-900">{stay.title}</h3>
+                <p className="truncate text-sm leading-[1.4] text-slate-500">{stay.description}</p>
+
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="flex items-center gap-1 text-sm text-slate-700">
+                    <svg viewBox="0 0 20 20" className="h-3.5 w-3.5 text-black" aria-hidden>
+                      <path
+                        fill="currentColor"
+                        d="M10 2.4l2.1 4.27 4.72.69-3.42 3.33.81 4.71L10 13.2l-4.22 2.2.81-4.71L3.17 7.36l4.72-.69L10 2.4Z"
+                      />
+                    </svg>
+                    <span>
+                      {stay.rating.toFixed(1)} ({stay.reviews})
+                    </span>
+                  </span>
+                  <span className="text-sm font-medium text-slate-600">
+                    {stay.trustBadge}
+                  </span>
+                </div>
+
+                <p className="pt-0.5 text-right text-[15px] font-semibold text-slate-900">£{stay.pricePerNight} / night</p>
+              </div>
+            </button>
           ))}
         </div>
       </section>
 
-      <section className="border-y border-slate-100 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-6 text-sm text-slate-600">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Enforced stay types
-            </span>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Clear pricing
-            </span>
-            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Professional focus
-            </span>
-          </div>
-          <span className="text-xs text-slate-500">
-            Designed for aviation crews and operational teams.
-          </span>
+      <section className="mx-auto max-w-6xl px-4 pb-8 pt-6 lg:pb-10 lg:pt-8">
+        <div className="mb-6">
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+            Stay types designed around real schedules
+          </h2>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {[
+            {
+              title: "Day-use stays",
+              body: "For quick rest windows, standby time, and between-duty recovery.",
+              ctaLabel: "Explore day-use stays",
+              href: "/search?mode=day_use",
+              icon: (
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <circle cx="12" cy="12" r="8" />
+                  <path d="M12 8v4l3 2" />
+                </svg>
+              ),
+            },
+            {
+              title: "Extended stays",
+              body: "For repeat rotations, training blocks, and longer assignments.",
+              ctaLabel: "Explore extended stays",
+              href: "/search?mode=extended",
+              icon: (
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <path d="M4 20h16" />
+                  <path d="M6 20V8h12v12" />
+                  <path d="M9 12h.01M12 12h.01M15 12h.01" />
+                </svg>
+              ),
+            },
+          ].map((item) => (
+            <article key={item.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+                {item.icon}
+              </span>
+              <h3 className="mt-4 text-lg font-semibold text-slate-900">{item.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
+              <div className="mt-5 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => router.push(item.href)}
+                  className="text-sm font-semibold text-slate-900 transition hover:text-slate-700"
+                >
+                  {item.ctaLabel} →
+                </button>
+                <span className="text-xs text-slate-500">Available on eligible listings</span>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
-      {/* Category headings and horizontal scroll sections */}
-      <div className="mx-auto max-w-7xl px-4 py-8">
-        <SectionCategory
-          title="Near airports"
-          description="Reliable stays within easy reach of the terminal."
-          listings={(filtered || [])
-            .filter((listing: any) => listing.airport_code || listing.airportCode)
-            .slice(0, 8)}
-          signedUrls={signedUrls}
-          emptyMessage="No airport stays yet. Check back soon."
-        />
-        <SectionCategory
-          title="Day‑use stays"
-          description="Hourly listings built for quick rest windows."
-          listings={(filtered || [])
-            .filter((listing: any) =>
-              listing.booking_unit === "hourly" ||
-              listing.bookingUnit === "hourly" ||
-              listing.rental_type === "day_use" ||
-              listing.rental_type === "split_rest"
-            )
-            .slice(0, 8)}
-          signedUrls={signedUrls}
-          emptyMessage="No day‑use listings yet. Try overnight stays for now."
-        />
-        <SectionCategory
-          title="Extended stays"
-          description="Longer nightly stays for repeat rotations."
-          listings={(filtered || [])
-            .filter((listing: any) => listing.rental_type === "crashpad" || listing.rental_type === "extended_stay")
-            .slice(0, 8)}
-          signedUrls={signedUrls}
-          emptyMessage="No extended stays yet. New listings are coming soon."
-        />
-      </div>
+      <section className="mx-auto max-w-6xl px-4 pb-8 pt-1 lg:pb-10">
+        <div className="mb-6">
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+            Built around real schedules
+          </h2>
+        </div>
 
-      <section className="mx-auto max-w-6xl px-4 pb-12">
-        <div className="rounded-3xl border border-slate-200 bg-slate-900 px-6 py-8 text-white shadow-sm md:flex md:items-center md:justify-between">
-          <div>
+        <div className="grid gap-4 md:grid-cols-3">
+          {[
+            {
+              title: "Search by airport",
+              body: "Start from the airport you operate from and filter by commute time.",
+              icon: (
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <path d="M12 22s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z" />
+                  <circle cx="12" cy="10" r="2.8" />
+                </svg>
+              ),
+            },
+            {
+              title: "Choose the stay type",
+              body: "Pick overnight, day-use, or longer formats based on duty windows.",
+              icon: (
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <rect x="3" y="5" width="18" height="15" rx="2.5" />
+                  <path d="M3 10h18" />
+                </svg>
+              ),
+            },
+            {
+              title: "Book with clear rules",
+              body: "Transparent pricing and enforced booking modes reduce surprises.",
+              icon: (
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <path d="M20 7 9 18l-5-5" />
+                </svg>
+              ),
+            },
+          ].map((item) => (
+            <article key={item.title} className="rounded-2xl border border-slate-200/80 bg-slate-50/40 p-5">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm">
+                {item.icon}
+              </span>
+              <h3 className="mt-4 text-base font-semibold text-slate-900">{item.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 pb-12 pt-1 lg:pb-14">
+        <div className="rounded-[28px] border border-slate-800 bg-slate-900 px-7 py-10 text-white shadow-sm md:flex md:items-center md:justify-between md:px-10 md:py-12">
+          <div className="max-w-2xl">
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Host with Avyro</p>
-            <h2 className="mt-3 text-2xl font-semibold">
-              Become a trusted host for professional crews.
+            <h2 className="mt-3 text-3xl font-semibold leading-tight">
+              Host near an airport? List with Avyro
             </h2>
-            <p className="mt-2 text-sm text-slate-300">
-              Set your stay type, price once, and let Avyro enforce the rules.
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Attract professional guests, set clear booking rules, and offer stays that fit real schedules.
             </p>
           </div>
           <button
             onClick={() => router.push("/host/create-listing")}
-            className="mt-4 rounded-full bg-white px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-100 md:mt-0"
+            className="mt-6 rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 md:mt-0"
           >
             Become a host
           </button>
@@ -508,64 +509,7 @@ export default function Home() {
         </div>
       </footer>
 
-      {/* Remove old results grid; handled in category sections above */}
+      {/* Remove old results grid; handled in curated homepage sections above */}
     </main>
-  );
-}
-// --- Category Section Component ---
-type SectionCategoryProps = {
-  title: string;
-  description?: string;
-  listings: any[];
-  signedUrls: Record<string, string>;
-  emptyMessage?: string;
-};
-
-function SectionCategory({
-  title,
-  description,
-  listings,
-  signedUrls,
-  emptyMessage,
-}: SectionCategoryProps) {
-  return (
-    <section className="mb-10">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h2 className="text-xl font-semibold">{title}</h2>
-          {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
-        </div>
-      </div>
-      {listings.length === 0 ? (
-        <p className="mt-4 text-sm text-slate-500">{emptyMessage ?? "No listings available."}</p>
-      ) : (
-        <div className="mt-4 flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory">
-          {listings.map((listing: any) => {
-            const imageUrl = pickImageUrl(listing, signedUrls);
-            const title = listing.title || listing.name || "Untitled listing";
-            const rating = toNumber(listing.review_overall ?? listing.reviewOverall);
-            const reviewCount = toNumber(listing.review_total ?? listing.reviewTotal);
-            const ratingLabel = rating != null ? formatReviewLabel(rating) : undefined;
-            const meta = buildMetaLine(listing);
-            const badgeText = getBadgeText(listing);
-
-            return (
-              <div key={listing.id} className="snap-start">
-                <HomeListingCard
-                  id={listing.id}
-                  title={title}
-                  imageUrl={imageUrl}
-                  badgeText={badgeText}
-                  rating={rating ?? undefined}
-                  ratingLabel={ratingLabel ?? undefined}
-                  reviewCount={reviewCount ?? undefined}
-                  meta={meta ?? undefined}
-                />
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
   );
 }

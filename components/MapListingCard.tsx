@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewSummaryLineFromScore } from "@/lib/reviews";
+import { computeGuestStayPricing } from "@/lib/pricing";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 
@@ -62,12 +63,15 @@ const toPublicUrl = (pathOrUrl?: string | null): string | null => {
   return data?.publicUrl ?? null;
 };
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-GB", {
+const formatCurrency = (value: number) => {
+  const isWhole = Math.round(value * 100) % 100 === 0;
+  return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: "GBP",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: isWhole ? 0 : 2,
+    maximumFractionDigits: isWhole ? 0 : 2,
   }).format(value);
+};
 
 const normaliseType = (value?: string) => {
   if (!value) return null;
@@ -175,13 +179,23 @@ export default function MapListingCard({
   const bookingUnit =
     listing.booking_unit === "hourly" ? "hourly" : "nightly";
   const unitLabel = bookingUnit === "hourly" ? "hour" : "night";
-  const basePrice =
+  const hostBasePrice =
     bookingUnit === "hourly"
       ? toNumber(listing.pricePerHour) ?? toNumber(listing.price)
       : toNumber(listing.pricePerNight) ?? toNumber(listing.price);
 
-  const totalPrice =
-    staySummary && basePrice ? basePrice * staySummary.units : null;
+  const stayUnits = staySummary?.units ?? 0;
+  const resolvedUnits = stayUnits > 0 ? stayUnits : 1;
+  const stayPricing =
+    hostBasePrice != null
+      ? computeGuestStayPricing({
+          hostNetUnitMajor: hostBasePrice,
+          units: resolvedUnits,
+          bookingUnit,
+          isFirstCompletedBooking: false,
+        })
+      : null;
+  const guestUnitPrice = stayPricing?.guest_unit_avg_major ?? null;
 
   const travelBadge = buildTravelBadge(listing);
   const titleLine = buildTitle(listing);
@@ -320,9 +334,9 @@ export default function MapListingCard({
 
         <div className="flex flex-col items-end justify-between text-right">
           <div>
-            {basePrice != null && (
+            {guestUnitPrice != null && (
               <div className="text-xl font-semibold text-[#0B0D10] font-mono tabular-nums">
-                {formatCurrency(basePrice)} / {unitLabel}
+                {formatCurrency(guestUnitPrice)} / {unitLabel}
               </div>
             )}
             <div className="text-xs font-medium text-[#4B5563]">All fees included</div>

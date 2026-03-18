@@ -40,6 +40,9 @@ const SECTION_ANIM = {
   viewport: { once: true, amount: 0.2 },
 };
 
+const MotionSection: any = motion.section;
+const MotionDiv: any = motion.div;
+
 export default function HostStanstedLanding() {
   const [scrolled, setScrolled] = useState(false);
   const [hostRate, setHostRate] = useState(60);
@@ -129,7 +132,7 @@ export default function HostStanstedLanding() {
         </header>
 
         <main className="mx-auto max-w-[1280px] px-6 pb-24 pt-14">
-          <motion.section
+          <MotionSection
             {...SECTION_ANIM}
             className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] items-center"
           >
@@ -182,7 +185,7 @@ export default function HostStanstedLanding() {
               <div className="absolute -bottom-14 right-24 h-56 w-56 rounded-full bg-[radial-gradient(circle_at_center,rgba(15,23,42,0.12),transparent_65%)]" />
 
               <div className="relative space-y-4">
-                <motion.div
+                <MotionDiv
                   whileHover={{ y: -4 }}
                   className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
                 >
@@ -193,9 +196,9 @@ export default function HostStanstedLanding() {
                   <p className="mt-1 text-sm text-slate-500">
                     projected monthly at {nightsPerMonth} nights
                   </p>
-                </motion.div>
+                </MotionDiv>
 
-                <motion.div
+                <MotionDiv
                   whileHover={{ y: -4 }}
                   className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
                 >
@@ -217,12 +220,12 @@ export default function HostStanstedLanding() {
                   <p className="mt-3 text-xs text-slate-400">
                     Rounded guest price · includes all fees
                   </p>
-                </motion.div>
+                </MotionDiv>
               </div>
             </div>
-          </motion.section>
+          </MotionSection>
 
-          <motion.section
+          <MotionSection
             {...SECTION_ANIM}
             id="earnings"
             className="mt-24 grid gap-10 lg:grid-cols-[1.1fr_0.9fr]"
@@ -336,9 +339,9 @@ export default function HostStanstedLanding() {
                 First completed booking is commission-free (processing fees still apply).
               </div>
             </div>
-          </motion.section>
+          </MotionSection>
 
-          <motion.section {...SECTION_ANIM} id="pricing" className="mt-24">
+          <MotionSection {...SECTION_ANIM} id="pricing" className="mt-24">
             <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
@@ -369,9 +372,9 @@ export default function HostStanstedLanding() {
                 First completed booking: platform commission £0 (processing fees still apply).
               </p>
             </div>
-          </motion.section>
+          </MotionSection>
 
-          <motion.section {...SECTION_ANIM} id="zone" className="mt-24">
+          <MotionSection {...SECTION_ANIM} id="zone" className="mt-24">
             <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] items-center">
               <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
                 <p className="text-xs uppercase tracking-[0.3em] text-slate-400">STN zone</p>
@@ -406,7 +409,7 @@ export default function HostStanstedLanding() {
                 </div>
               </div>
             </div>
-          </motion.section>
+          </MotionSection>
         </main>
       </div>
     </>

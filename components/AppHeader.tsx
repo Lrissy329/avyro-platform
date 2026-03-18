@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "@/lib/supabaseClient";
@@ -19,14 +20,20 @@ type AppHeaderProps = {
 const cx = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
 
+const resolveDashboardHref = (profile: Profile | null) => {
+  if (!profile) return "/login";
+  if (profile.role_host) return "/host/dashboard";
+  if (profile.role_guest) return "/guest/dashboard";
+  return "/guest/dashboard";
+};
+
 export function AppHeader({ notificationCount, onSignOut, initialProfile = null }: AppHeaderProps) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(initialProfile);
-  const [userId, setUserId] = useState<string | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(!initialProfile);
   const [signingOut, setSigningOut] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -34,7 +41,6 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
         data: { session },
       } = await supabase.auth.getSession();
       const user = session?.user;
-      setUserId(user?.id ?? null);
 
       if (!user) {
         setProfile(null);
@@ -80,13 +86,24 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
 
   useEffect(() => {
     if (!menuOpen) return;
+
     const handleClick = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setMenuOpen(false);
       }
     };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, [menuOpen]);
 
   const handleSignOut = async () => {
@@ -106,182 +123,189 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
     }
   };
 
-  const initials =
-    profile?.full_name?.[0] ??
-    profile?.avatar_url ??
-    (router.isReady ? router.query?.email?.[0] : undefined) ??
-    "U";
+  const normalizePath = (value: string) => {
+    const [withoutHash] = value.split("#");
+    const [withoutQuery] = withoutHash.split("?");
+    const trimmed = withoutQuery.replace(/\/+$/, "");
+    return trimmed || "/";
+  };
+
+  const isSameRoute = (href: string) => normalizePath(router.asPath) === normalizePath(href);
+
+  const go = (href: string) => {
+    if (!isSameRoute(href)) {
+      router.push(href).catch(() => null);
+    }
+    setMenuOpen(false);
+  };
+
+  const displayName =
+    profile?.full_name?.trim() ||
+    (router.isReady ? String(router.query?.email || "") : "") ||
+    "Guest";
+
+  const initials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "G";
+
+  const dashboardHref = resolveDashboardHref(profile);
+  const hostCtaHref = profile?.role_host ? "/host/dashboard" : "/host/create-listing";
+  const hostCtaLabel = profile?.role_host ? "Host dashboard" : "Become a host";
 
   return (
-    <header className="sticky top-0 z-30 w-full border-b border-gray-200 bg-white">
-      <div className="relative mx-auto flex h-20 max-w-6xl items-center justify-between px-4 sm:px-8">
-        <div className="flex items-center">
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="flex items-center bg-transparent p-0 hover:bg-transparent focus-visible:outline-none"
-            aria-label="Avyro home"
-          >
-            <Image
-              src="/avyro-logo.svg"
-              alt="Avyro – Accommodation for Professionals"
-              width={184}
-              height={40}
-              priority
-              className="cursor-pointer"
-            />
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 sm:gap-4">
-          <button
-            type="button"
-            onClick={() =>
-              router.push(profile?.role_host ? "/host/dashboard" : "/host/create-listing")
+    <header className="sticky top-0 z-50 w-full border-b border-slate-200/90 bg-white/95 backdrop-blur">
+      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+        <button
+          type="button"
+          onClick={() => {
+            if (!isSameRoute("/")) {
+              router.push("/").catch(() => null);
             }
-            className="hidden rounded-full px-3 py-2 text-sm font-medium text-gray-900 transition hover:bg-gray-100 md:block"
-          >
-            Become a host
-          </button>
+          }}
+          className="flex items-center bg-transparent p-0 hover:bg-transparent focus-visible:outline-none"
+          aria-label="Avyro home"
+        >
+          <Image
+            src="/avyro-logo.svg"
+            alt="Avyro - Accommodation for Professionals"
+            width={184}
+            height={40}
+            priority
+            className="cursor-pointer"
+          />
+        </button>
 
-          <button
-            type="button"
-            aria-label="Change language"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-lg hover:bg-gray-100"
-          >
-            🌐
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMenuOpen((prev) => !prev)}
-            aria-label="Toggle menu"
-            className="relative flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 transition hover:shadow-md"
-          >
-            <span className="inline-flex h-4 w-4 flex-col justify-between">
-              <span className="block h-0.5 w-full rounded-full bg-gray-700" />
-              <span className="block h-0.5 w-full rounded-full bg-gray-700" />
-              <span className="block h-0.5 w-full rounded-full bg-gray-700" />
-            </span>
-            <span className="relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-gray-100">
-              {profile?.avatar_url ? (
-                <img
-                  src={profile.avatar_url}
-                  alt="Profile"
-                  className="h-full w-full object-cover"
-                />
-              ) : loadingProfile ? (
-                <span className="h-full w-full animate-pulse bg-gray-200" />
-              ) : (
-                <span className="text-sm font-medium text-gray-700">
-                  {initials?.toUpperCase()}
-                </span>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <nav className="hidden items-center gap-1 lg:flex">
+            <Link
+              href="/search"
+              className={cx(
+                "rounded-full px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100",
+                router.pathname === "/search" && "bg-slate-100 text-slate-900"
               )}
-              {!!notificationCount && notificationCount > 0 && (
-                <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-xs font-semibold text-white">
-                  {notificationCount}
-                </span>
-              )}
-            </span>
-          </button>
-        </div>
+            >
+              Search stays
+            </Link>
+            <Link
+              href={hostCtaHref}
+              className="rounded-full px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            >
+              {hostCtaLabel}
+            </Link>
+          </nav>
 
-        {menuOpen && (
-          <div
-            ref={menuRef}
-            className="absolute right-4 top-full mt-3 w-72 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl sm:right-0"
-          >
-            {profile ? (
-              <>
-                <div className="border-b border-gray-100 px-4 py-3">
-                  <p className="text-sm font-semibold text-gray-900">
-                    {profile.full_name ?? "Your account"}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {profile.role_host ? "Host" : profile.role_guest ? "Guest" : "Member"}
-                  </p>
-                </div>
-                <nav className="px-2 py-2 text-sm text-gray-700">
-                  <ButtonMenuItem
-                    label="Dashboard"
-                    onClick={() => {
-                      router.push(profile.role_host ? "/host/dashboard" : "/guest/dashboard");
-                      setMenuOpen(false);
-                    }}
+          {profile ? (
+            <Link
+              href={dashboardHref}
+              className="hidden rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-500 sm:inline-flex"
+            >
+              Dashboard
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="hidden rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 transition hover:border-slate-500 sm:inline-flex"
+              >
+                Log in
+              </Link>
+              <Link
+                href="/complete-profile"
+                className="hidden rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700 sm:inline-flex"
+              >
+                Sign up
+              </Link>
+            </>
+          )}
+
+          <div ref={dropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
+              aria-label="Open menu"
+              className="flex items-center gap-2 rounded-full border border-slate-300 bg-white px-2.5 py-1.5 transition hover:border-slate-500"
+            >
+              <span className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-slate-100">
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
                   />
-                  <ButtonMenuItem
-                    label="Messages"
-                    onClick={() => {
-                      router.push(
-                        profile.role_host ? "/host/dashboard#messages" : "/guest/dashboard"
-                      );
-                      setMenuOpen(false);
-                    }}
-                  />
-                  <ButtonMenuItem
-                    label="Notifications"
-                    badge={
-                      notificationCount && notificationCount > 0
-                        ? notificationCount
-                        : undefined
-                    }
-                    onClick={() => {
-                      router.push(profile.role_host ? "/host/dashboard" : "/guest/dashboard");
-                      setMenuOpen(false);
-                    }}
-                  />
-                  <ButtonMenuItem
-                    label="Explore stays"
-                    onClick={() => {
-                      router.push("/search");
-                      setMenuOpen(false);
-                    }}
-                  />
-                  {profile.role_host && (
-                    <ButtonMenuItem
-                      label="Create listing"
-                      onClick={() => {
-                        router.push("/host/create-listing");
-                        setMenuOpen(false);
-                      }}
-                    />
-                  )}
-                  <hr className="my-2 border-gray-200" />
-                  <ButtonMenuItem
-                    label={signingOut ? "Signing out…" : "Log out"}
-                    onClick={() => {
-                      handleSignOut();
-                      setMenuOpen(false);
-                    }}
-                    disabled={signingOut}
-                    danger
-                  />
-                </nav>
-              </>
-            ) : (
-              <div className="px-4 py-4 text-sm text-gray-700">
-                <p className="mb-3 font-medium">Welcome to AeroNooc</p>
-                <div className="flex flex-col gap-2">
-                  <ButtonMenuItem
-                    label="Log in"
-                    onClick={() => {
-                      router.push("/login");
-                      setMenuOpen(false);
-                    }}
-                  />
-                  <ButtonMenuItem
-                    label="Sign up"
-                    onClick={() => {
-                      router.push("/complete-profile");
-                      setMenuOpen(false);
-                    }}
-                    primary
-                  />
-                </div>
+                ) : loadingProfile ? (
+                  <span className="h-full w-full animate-pulse bg-slate-200" />
+                ) : (
+                  <span className="text-xs font-semibold text-slate-700">{initials}</span>
+                )}
+                {!!notificationCount && notificationCount > 0 && (
+                  <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
+                    {notificationCount}
+                  </span>
+                )}
+              </span>
+              <span className="hidden text-sm font-medium text-slate-800 sm:inline">
+                {profile ? displayName.split(" ")[0] : "Menu"}
+              </span>
+              <span className="text-xs text-slate-500">▾</span>
+            </button>
+
+            {menuOpen && (
+              <div
+                className="absolute right-0 top-full mt-3 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
+                role="menu"
+              >
+                {profile ? (
+                  <>
+                    <div className="border-b border-slate-100 px-4 py-3">
+                      <p className="text-sm font-semibold text-slate-900">{displayName}</p>
+                      <p className="text-xs text-slate-500">
+                        {profile.role_host ? "Host" : profile.role_guest ? "Guest" : "Member"}
+                      </p>
+                    </div>
+                    <nav className="px-2 py-2 text-sm text-slate-700">
+                      <ButtonMenuItem label="Dashboard" onClick={() => go(dashboardHref)} />
+                      <ButtonMenuItem label="Explore stays" onClick={() => go("/search")} />
+                      {profile.role_host ? (
+                        <ButtonMenuItem label="Host messages" onClick={() => go("/host/messages")} />
+                      ) : (
+                        <ButtonMenuItem label="Trips" onClick={() => go("/guest/dashboard")} />
+                      )}
+                      <ButtonMenuItem label="Profile" onClick={() => go("/guest/profile")} />
+                      {!profile.role_host ? (
+                        <ButtonMenuItem label="Become a host" onClick={() => go("/host/create-listing")} />
+                      ) : null}
+                      <hr className="my-2 border-slate-200" />
+                      <ButtonMenuItem
+                        label={signingOut ? "Signing out..." : "Log out"}
+                        onClick={() => {
+                          handleSignOut();
+                          setMenuOpen(false);
+                        }}
+                        disabled={signingOut}
+                        danger
+                      />
+                    </nav>
+                  </>
+                ) : (
+                  <div className="px-3 py-3">
+                    <p className="mb-2 px-2 text-sm font-medium text-slate-700">Welcome to Avyro</p>
+                    <div className="space-y-1 text-sm text-slate-700">
+                      <ButtonMenuItem label="Log in" onClick={() => go("/login")} />
+                      <ButtonMenuItem label="Sign up" onClick={() => go("/complete-profile")} primary />
+                      <ButtonMenuItem label="Search stays" onClick={() => go("/search")} />
+                      <ButtonMenuItem label="Become a host" onClick={() => go("/host/create-listing")} />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
+        </div>
       </div>
     </header>
   );
@@ -293,7 +317,6 @@ type ButtonMenuItemProps = {
   disabled?: boolean;
   danger?: boolean;
   primary?: boolean;
-  badge?: string | number | null;
 };
 
 function ButtonMenuItem({
@@ -302,7 +325,6 @@ function ButtonMenuItem({
   disabled,
   danger,
   primary,
-  badge,
 }: ButtonMenuItemProps) {
   return (
     <button
@@ -313,19 +335,13 @@ function ButtonMenuItem({
         danger
           ? "text-red-600 hover:bg-red-50"
           : primary
-          ? "bg-black text-white hover:bg-gray-900"
-          : "hover:bg-gray-50",
+          ? "bg-slate-900 text-white hover:bg-slate-700"
+          : "hover:bg-slate-50",
         disabled && "cursor-not-allowed opacity-60"
       )}
+      role="menuitem"
     >
-      <span className="flex items-center justify-between gap-2">
-        <span>{label}</span>
-        {badge ? (
-          <span className="inline-flex items-center justify-center rounded-full bg-gray-900 px-2 text-xs font-semibold text-white">
-            {badge}
-          </span>
-        ) : null}
-      </span>
+      <span>{label}</span>
     </button>
   );
 }

@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import AeronoocMap from "@/components/map";
 import BookingWidget from "@/components/BookingWidget";
 import AvailabilityCalendarNightly from "@/components/AvailabilityCalendarNightly";
-import { buildReviewSummary, getFallbackReviewSummary } from "@/lib/reviews";
+import { buildReviewSummary } from "@/lib/reviews";
 import { supabase } from "@/lib/supabaseClient";
 import { computePricingFromMajor, getServiceFeeRate } from "@/lib/pricing";
 import { mapAmenities } from "@/lib/amenities";
@@ -62,6 +62,33 @@ type HostProfile = {
   full_name: string | null;
   avatar_url: string | null;
   headline?: string | null;
+};
+type ListingReviewsApiSummary = {
+  count: number;
+  averages: {
+    overall: number;
+    accuracy: number;
+    cleanliness: number;
+    communication: number;
+    checkin: number;
+    noise: number;
+    transport: number;
+    value: number;
+  };
+  wouldStayAgainPct: number | null;
+};
+type ListingReviewsApiReview = {
+  id: string;
+  reviewerId: string;
+  reviewerName: string | null;
+  overallScore: number;
+  publicComment: string | null;
+  createdAt: string | null;
+};
+type ListingReviewsApiResponse = {
+  listingId: string;
+  summary: ListingReviewsApiSummary;
+  reviews: ListingReviewsApiReview[];
 };
 const BUCKET = "listing-photos";
 const toPublicUrl = (pathOrUrl?: string | null): string | null => {
@@ -211,6 +238,7 @@ export default function ListingDetail() {
   const [loading, setLoading] = useState(true);
   const [host, setHost] = useState<HostProfile | null>(null);
   const [transportSummary, setTransportSummary] = useState<TransportSummary | null>(null);
+  const [listingReviews, setListingReviews] = useState<ListingReviewsApiResponse | null>(null);
   const [nightlyRange, setNightlyRange] = useState<{ from: Date | null; to: Date | null }>({
     from: null,
     to: null,
@@ -327,6 +355,29 @@ export default function ListingDetail() {
       }
     })();
   }, [id]);
+  useEffect(() => {
+    if (!id || typeof id !== "string") return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await fetch(
+          `/api/reviews/listing?listingId=${encodeURIComponent(id)}`
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as ListingReviewsApiResponse;
+        if (!cancelled) {
+          setListingReviews(payload);
+        }
+      } catch (error) {
+        console.error("[listing] failed to load listing reviews", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
   const nightlyRate = !isHourlyListing ? listing?.price_per_night ?? null : null;
   const hourlyRate = isHourlyListing ? listing?.price_per_hour ?? null : null;
   const baseRate = isHourlyListing ? hourlyRate : nightlyRate;
@@ -399,6 +450,21 @@ export default function ListingDetail() {
   const shortLocation =
     listing?.location?.split(",")[0]?.trim() || listing?.airport_code || listing?.title || "this stay";
   const reviewSummary = useMemo(() => {
+    if (listingReviews?.summary?.count && listingReviews.summary.count > 0) {
+      const averages = listingReviews.summary.averages;
+      return buildReviewSummary(
+        {
+          cleanliness: averages.cleanliness ?? 0,
+          accuracy: averages.accuracy ?? 0,
+          comfort: averages.noise ?? 0,
+          location: averages.transport ?? 0,
+          value: averages.value ?? 0,
+          host: ((averages.communication ?? 0) + (averages.checkin ?? 0)) / 2,
+        },
+        listingReviews.summary.count
+      );
+    }
+
     if (listing && (listing as any).review_scores) {
       const scores = (listing as any).review_scores;
       if (
@@ -414,8 +480,26 @@ export default function ListingDetail() {
         return buildReviewSummary(scores, Number((listing as any).review_count ?? 0));
       }
     }
-    return getFallbackReviewSummary();
-  }, [listing]);
+    return buildReviewSummary(
+      {
+        cleanliness: 0,
+        accuracy: 0,
+        comfort: 0,
+        location: 0,
+        value: 0,
+        host: 0,
+      },
+      Number((listing as any)?.review_count ?? 0)
+    );
+  }, [listing, listingReviews]);
+  const publicReviewComments = useMemo(
+    () =>
+      (listingReviews?.reviews ?? []).filter(
+        (review) => typeof review.publicComment === "string" && review.publicComment.trim().length > 0
+      ),
+    [listingReviews]
+  );
+  const hasPublishedReviews = reviewSummary.total > 0;
   const heroPhotos = useMemo(() => {
     if (photoUrls.length === 0) return ["/placeholder.jpg"];
     if (photoUrls.length >= 5) return photoUrls.slice(0, 5);
@@ -696,12 +780,12 @@ export default function ListingDetail() {
 
           </div>
 
-          <aside className="lg:sticky lg:top-8 self-start">
+          <aside className="self-start lg:sticky lg:top-24">
             <BookingWidget
               listingId={listing.id}
               basePrice={baseRate}
               hostId={listing.user_id ?? ""}
-              bookingUnit={listing.booking_unit}
+              bookingUnit={listing.booking_unit === "hourly" ? "hourly" : "nightly"}
               rentalType={listing.rental_type}
               nightlyRange={nightlyRange}
               onNightlyRangeChange={setNightlyRange}
@@ -801,16 +885,18 @@ export default function ListingDetail() {
                     Guest rating
                   </p>
                   <p className="text-3xl font-semibold text-slate-900">
-                    {reviewSummary.overall.toFixed(1)}
+                    {hasPublishedReviews ? reviewSummary.overall.toFixed(1) : "—"}
                     <span className="text-base font-medium text-slate-500"> / 10</span>
                   </p>
                 </div>
               </div>
               <div>
                 <p className="text-sm font-semibold text-slate-900">
-                  {reviewSummary.overall.toFixed(1)}
-                  {reviewSummary.label ? ` · ${reviewSummary.label}` : ""} ·{" "}
-                  {reviewSummary.total} reviews
+                  {hasPublishedReviews
+                    ? `${reviewSummary.overall.toFixed(1)}${
+                        reviewSummary.label ? ` · ${reviewSummary.label}` : ""
+                      } · ${reviewSummary.total} reviews`
+                    : "No published reviews yet"}
                 </p>
                 <p className="text-sm text-slate-500">
                   Ratings reflect verified stays and post-trip feedback.
@@ -840,6 +926,39 @@ export default function ListingDetail() {
                   </div>
                 );
               })}
+            </div>
+            <div className="mt-8">
+              <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Guest comments
+              </h4>
+              {publicReviewComments.length > 0 ? (
+                <div className="mt-3 space-y-3">
+                  {publicReviewComments.slice(0, 8).map((review) => (
+                    <article
+                      key={review.id}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                        <span className="font-semibold text-slate-700">
+                          {review.reviewerName ?? "Guest"}
+                        </span>
+                        <span>
+                          {review.createdAt
+                            ? new Date(review.createdAt).toLocaleDateString("en-GB")
+                            : "Recent stay"}
+                          {" · "}
+                          {review.overallScore.toFixed(1)}/10
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-700">{review.publicComment}</p>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">
+                  No published comments yet for this listing.
+                </p>
+              )}
             </div>
           </div>
         </section>

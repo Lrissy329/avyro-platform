@@ -87,33 +87,14 @@ export default async function handler(
     return res.status(409).json({ error: "Listing nightly price unavailable." });
   }
 
-  let isFirstCompletedBooking = false;
-  if (listingRow.user_id) {
-    const { count, error: bookingCountError } = await supabase
-      .from("bookings")
-      .select("id", { count: "exact", head: true })
-      .eq("host_id", listingRow.user_id)
-      .in("status", ["confirmed", "completed"]);
-
-    if (bookingCountError) {
-      console.error("[api/bookings/quote] failed to check host bookings", bookingCountError);
-    } else {
-      isFirstCompletedBooking = (count ?? 0) === 0;
-    }
-  }
-
   const hostNetNightlyPence = Math.round(Number(nightlyMajor) * 100);
   const hostNetTotalPence = hostNetNightlyPence * nights;
   const pricing = computeAllInPricing({
     hostNetTotalPence,
     nights,
-    isFirstCompletedBooking,
+    isFirstCompletedBooking: false,
   });
-  const guestUnitPricePence = computeAllInPricing({
-    hostNetTotalPence: hostNetNightlyPence,
-    nights,
-    isFirstCompletedBooking,
-  }).guest_total_pence;
+  const guestUnitPricePence = Math.round(pricing.guest_total_pence / nights);
 
   return res.status(200).json({
     nights,

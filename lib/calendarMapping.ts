@@ -10,6 +10,7 @@ type BookingRow = {
   channel: string | null;
   status: BookingStatus | null;
   price_total: number | null;
+  host_net_total_pence?: number | null;
   currency: string | null;
   guest_full_name?: string | null;
   stay_type?: string | null;
@@ -116,25 +117,32 @@ export function mapHostBookingsToLinearEvents(
     .filter((booking) => booking.listing_id && booking.check_in_time && booking.check_out_time)
     .map<LinearCalendarEvent>((booking) => {
       const source = mapChannelToSource(booking.channel);
-      const label =
-        booking.guest_full_name?.trim() ||
-        listingNames[booking.listing_id as string] ||
-        "Booking";
+      const fullName = booking.guest_full_name?.trim() || "Guest";
+      const firstName = fullName.split(" ")[0] || "Guest";
+      const label = firstName;
+      const start = new Date(booking.check_in_time as string);
+      const end = new Date(booking.check_out_time as string);
+      const nights = Math.max(1, diffInDays(end, start));
+      const nightlyRate =
+        booking.price_total && nights > 0 ? booking.price_total / nights : null;
 
       const meta: LinearCalendarEvent["meta"] = {
         kind: "booking",
         status: booking.status ?? undefined,
         total: booking.price_total ?? null,
+        hostPayout: booking.host_net_total_pence ?? null,
         currency: booking.currency ?? "GBP",
-        guestName: booking.guest_full_name ?? null,
+        nights,
+        nightlyRate,
+        guestName: booking.guest_full_name ?? fullName,
         stayType: booking.stay_type ?? null,
       };
 
       return {
         id: booking.id,
         listingId: booking.listing_id as string,
-        start: new Date(booking.check_in_time as string),
-        end: new Date(booking.check_out_time as string),
+        start,
+        end,
         label,
         color: colorForChannel(booking.channel),
         textColor: "#ffffff",
@@ -162,7 +170,7 @@ export function mapHostBlocksToLinearEvents(blocks: CalendarBlockRow[]): LinearC
 
       const isManualBlock = source === "manual";
       const blockColor = isManualBlock ? (block.color ?? colorForSource(source)) : "#e2e8f0";
-      const blockTextColor = isManualBlock ? "#7c2d12" : "#475569";
+      const blockTextColor = isManualBlock ? "#1f2937" : "#334155";
 
       const meta: LinearCalendarEvent["meta"] = {
         kind: "block",

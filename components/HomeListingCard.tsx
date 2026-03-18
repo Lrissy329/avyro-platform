@@ -10,7 +10,16 @@ type Props = {
   ratingLabel?: string;
   reviewCount?: number;
   meta?: string;
+  price?: number;
+  priceUnit?: "night" | "hour";
 };
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    maximumFractionDigits: 0,
+  }).format(value);
 
 export default function HomeListingCard({
   id,
@@ -21,6 +30,8 @@ export default function HomeListingCard({
   ratingLabel,
   reviewCount,
   meta,
+  price,
+  priceUnit = "night",
 }: Props) {
   return (
     <Link
@@ -60,6 +71,13 @@ export default function HomeListingCard({
         ) : null}
 
         {meta ? <div className="text-sm text-neutral-500 line-clamp-1">{meta}</div> : null}
+
+        {typeof price === "number" && Number.isFinite(price) ? (
+          <div className="pt-1 text-sm text-neutral-900">
+            <span className="font-semibold">{formatCurrency(price)}</span>
+            <span className="text-neutral-500"> / {priceUnit}</span>
+          </div>
+        ) : null}
       </div>
     </Link>
   );

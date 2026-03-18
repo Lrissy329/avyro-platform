@@ -16,8 +16,8 @@ import { getChannelMeta } from "@/lib/calendarChannel";
 import { addDays, startOfDayInTimeZone } from "@/lib/dateUtils";
 import type { LinearCalendarListing } from "@/components/calendar/LinearCalendar";
 
-const ROW_HEIGHT = 48;
-const HEADER_HEIGHT = 56;
+const ROW_HEIGHT = 92;
+const HEADER_HEIGHT = 48;
 const SLOT_MINUTES = 30;
 const TOTAL_SLOTS = 48;
 const SLOT_MIN_WIDTH = 36;
@@ -38,6 +38,7 @@ type HourlyTimelineProps = {
   listings: LinearCalendarListing[];
   events: LinearCalendarEvent[];
   date: Date;
+  selectedEventId?: string | null;
   selection?: { listingId: string; start: Date; end: Date } | null;
   onSelectRange?: (listingId: string, start: Date, end: Date) => void;
   onClearSelection?: () => void;
@@ -50,6 +51,7 @@ export function HourlyTimeline({
   listings,
   events,
   date,
+  selectedEventId,
   selection,
   onSelectRange,
   onClearSelection,
@@ -158,18 +160,18 @@ export function HourlyTimeline({
   const headerHours = useMemo(() => Array.from({ length: 24 }, (_, idx) => idx), []);
 
   return (
-    <div className="mt-6">
-      <div className="rounded-2xl border border-slate-200 bg-white">
-        <div className="flex overflow-x-auto">
-          <div className="sticky left-0 z-20 w-52 shrink-0 border-r border-slate-200 bg-white">
+    <div className="min-h-[70vh]">
+      <div className="rounded-2xl border border-slate-200 bg-white min-h-[70vh] shadow-sm p-3">
+        <div className="flex h-full overflow-x-auto">
+          <div className="sticky left-0 z-20 w-44 shrink-0 border-r border-slate-200 bg-white">
             <div
-              className="border-b border-slate-200 bg-slate-50/80"
+              className="border-b border-slate-200 bg-slate-50"
               style={{ height: `${HEADER_HEIGHT}px` }}
             />
             {listings.map((listing) => (
               <div
                 key={listing.id}
-                className="flex items-center border-b border-slate-200 px-3 text-xs font-medium text-slate-800"
+                className="flex items-center border-b border-slate-200 px-3 text-xs text-slate-500"
                 style={{ height: `${ROW_HEIGHT}px` }}
               >
                 <span className="truncate">{listing.name}</span>
@@ -179,13 +181,13 @@ export function HourlyTimeline({
 
           <div className="relative flex-1" style={{ minWidth: `${TOTAL_SLOTS * SLOT_MIN_WIDTH}px` }}>
             <div
-              className="sticky top-0 z-10 grid border-b border-slate-200 bg-white text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400"
+              className="sticky top-0 z-10 grid border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-700"
               style={{ ...gridStyle, height: `${HEADER_HEIGHT}px` }}
             >
               {headerHours.map((hour) => (
                 <div
                   key={`hour-${hour}`}
-                  className="flex items-center justify-center border-r border-slate-100 font-mono tabular-nums"
+                  className="flex items-center justify-center border-r border-slate-200 font-mono tabular-nums"
                   style={{ gridColumnStart: hour * 2 + 1, gridColumnEnd: hour * 2 + 3 }}
                 >
                   {String(hour).padStart(2, "0")}:00
@@ -201,7 +203,7 @@ export function HourlyTimeline({
                   : null;
 
               return (
-                <div key={listing.id} className="border-b border-slate-100">
+                <div key={listing.id} className="border-b border-slate-200">
                   <div
                     className="relative grid"
                     style={{ ...gridStyle, height: `${ROW_HEIGHT}px` }}
@@ -211,7 +213,7 @@ export function HourlyTimeline({
                         key={`${listing.id}-slot-${slot}`}
                         type="button"
                         className={clsx(
-                          "relative h-full border-r border-slate-100 text-[10px] text-transparent hover:bg-slate-50",
+                          "relative h-full border-r border-slate-200 text-[10px] text-transparent hover:bg-slate-50",
                           slot % 2 === 1 && "bg-slate-50/30"
                         )}
                         style={{
@@ -254,7 +256,7 @@ export function HourlyTimeline({
 
                     {selectionOverlay && (
                       <div
-                        className="rounded-md border border-dashed border-[#FEDD02]/40 bg-[#FEDD02]/15"
+                        className="rounded-md border border-dashed border-yellow-200/70 bg-yellow-100/40"
                         style={{
                           gridColumnStart: selectionOverlay.startSlot + 1,
                           gridColumnEnd: selectionOverlay.endSlot + 2,
@@ -284,10 +286,10 @@ export function HourlyTimeline({
                         <div
                           key={event.id}
                           className={clsx(
-                            "relative flex h-9 items-center rounded-lg px-3 pr-7 text-[11px] font-medium shadow-sm",
+                            "relative flex h-9 items-center justify-between gap-2 rounded-md px-3 text-sm font-semibold text-slate-900 overflow-hidden whitespace-nowrap shadow-sm",
                             channelMeta.bgClass,
                             channelMeta.textClass,
-                            isBlock && "border border-slate-200"
+                            isBlock && "bg-slate-200 text-slate-900"
                           )}
                           style={{
                             gridColumnStart: startSlot + 1,
@@ -299,14 +301,12 @@ export function HourlyTimeline({
                           onClick={() => onBookingClick?.(event)}
                         >
                           <span className="truncate">{event.label}</span>
-                          <span className="absolute right-1 top-1">
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 ring-1 ring-black/10">
-                              <img
-                                src={channelMeta.badgeIcon}
-                                alt={channelMeta.label}
-                                className="h-4 w-4"
-                              />
-                            </span>
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/90">
+                            <img
+                              src={channelMeta.badgeIcon}
+                              alt={channelMeta.label}
+                              className="h-3 w-3"
+                            />
                           </span>
                         </div>
                       );

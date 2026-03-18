@@ -68,7 +68,10 @@ export function RoleSwitcher({ tone = "light", className = "" }: RoleSwitcherPro
       return;
     }
 
-    router.push(`/${newRole}/dashboard`);
+    const destination = `/${newRole}/dashboard`;
+    if (router.asPath.split("?")[0] !== destination) {
+      router.push(destination).catch(() => null);
+    }
   };
 
   if (loading) return null;
@@ -80,12 +83,26 @@ export function RoleSwitcher({ tone = "light", className = "" }: RoleSwitcherPro
   return (
     <div className={`inline-flex items-center gap-2 ${className}`}>
       {isHost && (
-        <button onClick={() => router.push("/host/dashboard")} className={buttonClass}>
+        <button
+          onClick={() => {
+            if (router.asPath.split("?")[0] !== "/host/dashboard") {
+              router.push("/host/dashboard").catch(() => null);
+            }
+          }}
+          className={buttonClass}
+        >
           Host view
         </button>
       )}
       {isGuest && (
-        <button onClick={() => router.push("/guest/dashboard")} className={buttonClass}>
+        <button
+          onClick={() => {
+            if (router.asPath.split("?")[0] !== "/guest/dashboard") {
+              router.push("/guest/dashboard").catch(() => null);
+            }
+          }}
+          className={buttonClass}
+        >
           Guest view
         </button>
       )}

@@ -5,11 +5,19 @@ import { ensureProfile } from "@/lib/ensureProfile";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
 import ProfileHeader, { type ProfileHeaderProfile } from "@/components/profile/ProfileHeader";
 import HostProfilePanel from "@/components/profile/HostProfilePanel";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { HostPageHeader } from "@/components/host/HostPageHeader";
 
 export default function HostProfilePage() {
   const router = useRouter();
   const [profile, setProfile] = useState<ProfileHeaderProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [stripeMeta, setStripeMeta] = useState<{
+    accountId: string | null;
+    onboardingStatus: string | null;
+    emailVerified: boolean;
+  }>({ accountId: null, onboardingStatus: null, emailVerified: false });
 
   const loadProfile = async () => {
     const {
@@ -25,7 +33,9 @@ export default function HostProfilePage() {
 
     const { data: profileRow } = await supabase
       .from("profiles")
-      .select("id, full_name, avatar_url, verification_level, verification_status, display_name, bio")
+      .select(
+        "id, full_name, avatar_url, verification_level, verification_status, display_name, bio, stripe_account_id, stripe_onboarding_status"
+      )
       .eq("id", user.id)
       .single();
 
@@ -47,6 +57,11 @@ export default function HostProfilePage() {
     setProfile({
       ...profileData,
       email: user.email ?? null,
+    });
+    setStripeMeta({
+      accountId: (profileRow as any)?.stripe_account_id ?? null,
+      onboardingStatus: (profileRow as any)?.stripe_onboarding_status ?? null,
+      emailVerified: Boolean(user.email_confirmed_at || (user as any).confirmed_at),
     });
     setLoading(false);
   };
@@ -95,19 +110,61 @@ export default function HostProfilePage() {
   if (loading) {
     return (
       <HostShellLayout title="Profile" activeNav="profile">
-        <p className="text-sm text-slate-600">Loading profile…</p>
+        <div className="space-y-8">
+          <HostPageHeader
+            title="Profile"
+            description="Update your public host profile and verification badges."
+          />
+          <p className="text-sm text-slate-600">Loading profile…</p>
+        </div>
       </HostShellLayout>
     );
   }
 
   return (
     <HostShellLayout title="Profile" activeNav="profile">
-      <div className="space-y-6">
+      <div className="space-y-8">
+        <HostPageHeader
+          title="Profile"
+          description="Update your public host profile and verification badges."
+        />
         <ProfileHeader
           profile={profile}
           onSaveName={handleSaveName}
           onUploadAvatar={handleAvatarUpload}
         />
+        <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-semibold text-slate-900">Badges</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            These badges show guests you are verified and ready to host.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Badge
+              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                stripeMeta.emailVerified
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-slate-50 text-slate-500 border-slate-200"
+              }`}
+            >
+              {stripeMeta.emailVerified ? "Email verified" : "Email unverified"}
+            </Badge>
+            <Badge
+              className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                stripeMeta.onboardingStatus === "complete"
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : stripeMeta.accountId
+                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                    : "bg-slate-50 text-slate-500 border-slate-200"
+              }`}
+            >
+              {stripeMeta.onboardingStatus === "complete"
+                ? "Stripe connected"
+                : stripeMeta.accountId
+                  ? "Stripe setup incomplete"
+                  : "Stripe not connected"}
+            </Badge>
+          </div>
+        </Card>
         <HostProfilePanel
           profile={profile ? { ...profile } : null}
           onSave={handleHostSave}

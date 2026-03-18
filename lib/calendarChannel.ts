@@ -14,44 +14,44 @@ type ChannelMetaOptions = {
 const CHANNEL_META: Record<LinearCalendarSource, ChannelMeta> = {
   booking: {
     label: "Direct",
-    bgClass: "bg-[#FEDD02]",
+    bgClass: "bg-yellow-200",
     textClass: "text-slate-900",
     badgeIcon: "/channel-icons/direct.svg",
   },
   airbnb: {
     label: "Airbnb",
-    bgClass: "bg-[#FF385C]",
-    textClass: "text-white",
+    bgClass: "bg-emerald-200",
+    textClass: "text-slate-900",
     badgeIcon: "/channel-icons/airbnb.svg",
   },
   vrbo: {
     label: "Vrbo",
-    bgClass: "bg-[#2563EB]",
-    textClass: "text-white",
+    bgClass: "bg-blue-200",
+    textClass: "text-slate-900",
     badgeIcon: "/channel-icons/vrbo.svg",
   },
   bookingcom: {
     label: "Booking.com",
-    bgClass: "bg-[#1D4ED8]",
-    textClass: "text-white",
+    bgClass: "bg-blue-200",
+    textClass: "text-slate-900",
     badgeIcon: "/channel-icons/booking.svg",
   },
   expedia: {
     label: "Expedia",
-    bgClass: "bg-[#FCD34D]",
+    bgClass: "bg-blue-200",
     textClass: "text-slate-900",
     badgeIcon: "/channel-icons/expedia.svg",
   },
   manual: {
     label: "Manual",
-    bgClass: "bg-slate-200",
-    textClass: "text-slate-700",
+    bgClass: "bg-slate-300",
+    textClass: "text-slate-900",
     badgeIcon: "/channel-icons/manual.svg",
   },
   other: {
     label: "External",
     bgClass: "bg-slate-200",
-    textClass: "text-slate-700",
+    textClass: "text-slate-900",
     badgeIcon: "/channel-icons/other.svg",
   },
 };
@@ -66,14 +66,14 @@ export function getChannelMeta(
       return {
         label: "Manual block",
         bgClass: "bg-slate-200",
-        textClass: "text-slate-700",
+        textClass: "text-slate-900",
         badgeIcon: "/channel-icons/manual.svg",
       };
     }
     return {
       label: "External block",
-      bgClass: "bg-slate-100",
-      textClass: "text-slate-600",
+      bgClass: "bg-slate-200",
+      textClass: "text-slate-900",
       badgeIcon: "/channel-icons/other.svg",
     };
   }

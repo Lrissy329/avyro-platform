@@ -16,6 +16,13 @@ export type AllInPricing = {
   stripe_fixed_pence: number;
 };
 
+export type GuestStayPricing = AllInPricing & {
+  units: number;
+  guest_unit_avg_pence: number;
+  guest_unit_avg_major: number;
+  guest_total_major: number;
+};
+
 const ceilDiv = (numerator: number, denominator: number) =>
   Math.floor((numerator + denominator - 1) / denominator);
 
@@ -160,6 +167,43 @@ export const computeGuestTotalMajorFromHostNet = (
   }
 ) =>
   computeGuestTotalPenceFromHostNet(Math.round(hostNetTotalMajor * 100), overrides) / 100;
+
+export function computeGuestStayPricing(params: {
+  hostNetUnitMajor: number;
+  units: number;
+  bookingUnit?: "nightly" | "hourly";
+  isFirstCompletedBooking?: boolean;
+  platformFeeBps?: number;
+  stripeVarBps?: number;
+  stripeFixedPence?: number;
+  minGuestTotalPence?: number;
+}): GuestStayPricing {
+  const bookingUnit = params.bookingUnit === "hourly" ? "hourly" : "nightly";
+  const minUnits = bookingUnit === "hourly" ? 0.5 : 1;
+  const units = Math.max(minUnits, params.units);
+  const hostNetTotalPence = Math.round(params.hostNetUnitMajor * units * 100);
+  const nights =
+    bookingUnit === "hourly" ? 1 : Math.max(1, Math.ceil(units));
+
+  const pricing = computeAllInPricing({
+    hostNetTotalPence,
+    nights,
+    isFirstCompletedBooking: params.isFirstCompletedBooking ?? false,
+    platformFeeBps: params.platformFeeBps,
+    stripeVarBps: params.stripeVarBps,
+    stripeFixedPence: params.stripeFixedPence,
+    minGuestTotalPence: params.minGuestTotalPence,
+  });
+
+  const guestUnitAvgPence = Math.round(pricing.guest_total_pence / units);
+  return {
+    ...pricing,
+    units,
+    guest_unit_avg_pence: guestUnitAvgPence,
+    guest_unit_avg_major: guestUnitAvgPence / 100,
+    guest_total_major: pricing.guest_total_pence / 100,
+  };
+}
 
 // Legacy helpers (kept for backwards compatibility, now alias all-in pricing)
 export type PricingBreakdownMinor = {

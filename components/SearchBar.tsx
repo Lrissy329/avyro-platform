@@ -277,57 +277,62 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
     <span className="text-sm text-neutral-400">{text}</span>
   );
 
-  const renderCalendarHeader = (monthsShown: number) => ({
-    monthDate,
-    customHeaderCount,
-    decreaseMonth,
-    increaseMonth,
-    prevMonthButtonDisabled,
-    nextMonthButtonDisabled,
-  }: {
-    monthDate: Date;
-    customHeaderCount: number;
-    decreaseMonth: () => void;
-    increaseMonth: () => void;
-    prevMonthButtonDisabled: boolean;
-    nextMonthButtonDisabled: boolean;
-  }) => {
-    const isFirst = customHeaderCount === 0;
-    const isLast = customHeaderCount === monthsShown - 1;
-    return (
-      <div className="flex items-center justify-between px-2 pb-2 pt-1">
-        <button
-          type="button"
-          onClick={decreaseMonth}
-          disabled={prevMonthButtonDisabled || !isFirst}
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
-          aria-label="Previous month"
-        >
-          ←
-        </button>
-        <div className="text-sm font-medium text-slate-700">
-          {monthDate.toLocaleDateString("en-GB", {
-            month: "long",
-            year: "numeric",
-          })}
+  const renderCalendarHeader = (monthsShown: number) => {
+    function CalendarHeader({
+      monthDate,
+      customHeaderCount,
+      decreaseMonth,
+      increaseMonth,
+      prevMonthButtonDisabled,
+      nextMonthButtonDisabled,
+    }: {
+      monthDate: Date;
+      customHeaderCount: number;
+      decreaseMonth: () => void;
+      increaseMonth: () => void;
+      prevMonthButtonDisabled: boolean;
+      nextMonthButtonDisabled: boolean;
+    }) {
+      const isFirst = customHeaderCount === 0;
+      const isLast = customHeaderCount === monthsShown - 1;
+      return (
+        <div className="flex items-center justify-between px-2 pb-2 pt-1">
+          <button
+            type="button"
+            onClick={decreaseMonth}
+            disabled={prevMonthButtonDisabled || !isFirst}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+            aria-label="Previous month"
+          >
+            ←
+          </button>
+          <div className="text-sm font-medium text-slate-700">
+            {monthDate.toLocaleDateString("en-GB", {
+              month: "long",
+              year: "numeric",
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={increaseMonth}
+            disabled={nextMonthButtonDisabled || !isLast}
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+            aria-label="Next month"
+          >
+            →
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={increaseMonth}
-          disabled={nextMonthButtonDisabled || !isLast}
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
-          aria-label="Next month"
-        >
-          →
-        </button>
-      </div>
-    );
+      );
+    }
+
+    CalendarHeader.displayName = "CalendarHeader";
+    return CalendarHeader;
   };
 
   return (
     <div
       ref={wrapperRef}
-      className={`relative w-full flex items-center ${
+      className={`relative flex w-full items-center ${
         align === "left" ? "justify-start" : "justify-center"
       }`}
     >
@@ -404,7 +409,7 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
 
         {/* Divider before search */}
         <div className="hidden sm:block h-8 w-px bg-neutral-200/60 mx-1" aria-hidden />
-        
+
         {/* SEARCH BUTTON */}
         <button
           type="button"

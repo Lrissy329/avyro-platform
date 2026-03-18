@@ -7,8 +7,6 @@ import {
 } from "react";
 import type {
   CSSProperties,
-  FocusEvent as ReactFocusEvent,
-  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from "react";
@@ -26,8 +24,6 @@ import {
   formatLocalDate,
   rangeToDates,
   startOfDay,
-  formatCurrency,
-  formatRangeSummary,
 } from "@/lib/dateUtils";
 import { getChannelMeta } from "@/lib/calendarChannel";
 
@@ -50,6 +46,8 @@ type LinearCalendarProps = {
   events: LinearCalendarEvent[];
   startDate: Date;
   endDate: Date;
+  selectedEventId?: string | null;
+  showRates?: boolean;
   selection?: SelectionPayload | null;
   onSelectRange?: (listingId: string, range: DateRange) => void;
   onClearSelection?: () => void;
@@ -70,20 +68,10 @@ type LinearCalendarEventWithVisibility = LinearCalendarEvent & {
   visible?: boolean;
 };
 
-type TooltipState = {
-  event: LinearCalendarEvent;
-  listingId: string;
-  left: number;
-  top: number;
-  containerLeft: number;
-  containerRight: number;
-  containerTop: number;
-};
-
 // ---- Layout constants ----
-const ROW_HEIGHT = 44; // px, height of each booking lane (was 32)
+const ROW_HEIGHT = 72; // px, height of each booking lane
 const ROW_GAP_PX = 8; // vertical gap between lanes
-const HEADER_HEIGHT = 80; // px, matches day header height
+const HEADER_HEIGHT = 48; // px, day header height
 const DAY_MIN_WIDTH = 72; // px, min width per day column
 
 // Helper: convert event.end (checkout / exclusive) → last stayed night (inclusive)
@@ -135,6 +123,8 @@ export function LinearCalendar({
   events,
   startDate,
   endDate,
+  selectedEventId,
+  showRates = false,
   selection,
   onSelectRange,
   onClearSelection,
@@ -220,7 +210,6 @@ export function LinearCalendar({
     lastX: number;
     accumulated: number;
   } | null>(null);
-  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [selectionState, setSelectionState] = useState<{
     listingId: string;
     anchor: Date;
@@ -308,42 +297,6 @@ export function LinearCalendar({
       window.removeEventListener("touchend", handlePointerUp);
     };
   }, [selectionState, selectionBounds, onSelectRange, onClearSelection]);
-
-  const showTooltip = useCallback(
-    (
-      listingId: string,
-      event: LinearCalendarEvent,
-      targetEvent: ReactMouseEvent<HTMLDivElement> | ReactFocusEvent<HTMLDivElement>
-    ) => {
-      const container = timelineRefs.current[listingId];
-      if (!container) {
-        setTooltip({
-          event,
-          listingId,
-          left: 0,
-          top: 0,
-          containerLeft: 0,
-          containerRight: 0,
-          containerTop: 0,
-        });
-        return;
-      }
-      const parentRect = container.getBoundingClientRect();
-      const targetRect = targetEvent.currentTarget.getBoundingClientRect();
-      setTooltip({
-        event,
-        listingId,
-        left: targetRect.left + targetRect.width / 2,
-        top: targetRect.top + targetRect.height / 2,
-        containerLeft: parentRect.left,
-        containerRight: parentRect.right,
-        containerTop: parentRect.top,
-      });
-    },
-    []
-  );
-
-  const hideTooltip = useCallback(() => setTooltip(null), []);
 
   const handleWheel = useCallback(
     (event: ReactWheelEvent<HTMLDivElement>) => {
@@ -433,8 +386,8 @@ export function LinearCalendar({
   };
 
   return (
-    <div className="mt-6">
-      <div className="border border-slate-200 rounded-2xl bg-white">
+    <div>
+      <div className="border border-slate-200 rounded-2xl bg-white shadow-sm p-3">
         <div
           ref={scrollerRef}
           className="relative flex overflow-x-auto overflow-y-visible"
@@ -446,9 +399,9 @@ export function LinearCalendar({
           style={{ touchAction: "pan-y" }}
         >
           {/* Left: listing labels */}
-          <div className="sticky left-0 z-30 w-52 shrink-0 bg-white border-r border-slate-200 shadow-[4px_0_12px_rgba(15,23,42,0.04)] relative">
+          <div className="sticky left-0 z-30 w-44 shrink-0 bg-white border-r border-slate-200 shadow-[4px_0_12px_rgba(15,23,42,0.04)] relative">
             <div
-              className="border-b border-slate-200 bg-slate-50/80"
+              className="border-b border-slate-200 bg-slate-50"
               style={{ height: `${HEADER_HEIGHT}px` }}
             />
             {listingLayouts.map(({ listing, rowCount }, listingIndex) => {
@@ -459,7 +412,7 @@ export function LinearCalendar({
                 <div
                   key={listing.id}
                   className={clsx(
-                    "flex items-center border-b border-slate-200 px-3 text-xs font-medium text-slate-800",
+                    "flex items-center border-b border-slate-200 px-3 text-xs text-slate-500",
                     isStripedRow && "bg-slate-50/60"
                   )}
                   style={{
@@ -480,34 +433,24 @@ export function LinearCalendar({
           >
             {/* Day header */}
             <div
-              className="sticky top-0 z-20 grid overflow-hidden bg-white border-b border-slate-200 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400"
+              className="sticky top-0 z-20 grid overflow-hidden bg-slate-50 border-b border-slate-200 text-[11px] font-medium uppercase tracking-wider text-slate-700"
               style={{ ...gridStyle, height: `${HEADER_HEIGHT}px` }}
             >
               {days.map((day, idx) => {
                 const iso = formatLocalDate(day);
                 const isToday = iso === todayIso;
-                const weekday = day.getDay();
-                const isWeekend = weekday === 0 || weekday === 6;
-                const isStripedColumn = idx % 2 === 1;
-
-                const headerBgClass = isToday
-                  ? "bg-[#0B0D10]/5"
-                  : isWeekend
-                  ? "bg-slate-50/80"
-                  : isStripedColumn
-                  ? "bg-slate-50/60"
-                  : "bg-white";
+                const headerBgClass = isToday ? "bg-yellow-50/50" : "bg-slate-50";
 
                 return (
                   <div
                     key={iso}
                     className={clsx(
-                      "relative flex flex-col items-center justify-center gap-1 border-r border-slate-100 py-2 text-center leading-tight",
+                      "relative flex flex-col items-center justify-center gap-1 border-r border-slate-200 py-2 text-center leading-tight",
                       headerBgClass
                     )}
                   >
                     {isToday && (
-                      <span className="mb-1 inline-flex items-center rounded-full bg-[#0B0D10] px-2 py-[2px] text-[9px] font-semibold uppercase tracking-[0.16em] text-white">
+                      <span className="mb-1 inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white">
                         Today
                       </span>
                     )}
@@ -545,7 +488,7 @@ export function LinearCalendar({
                 <div
                   key={listing.id}
                   className={clsx(
-                    "border-b border-slate-100",
+                    "border-b border-slate-200",
                     isStripedRow ? "bg-slate-50/40" : "bg-white"
                   )}
                 >
@@ -564,7 +507,7 @@ export function LinearCalendar({
                       (_, idx) => (
                         <div
                           key={`${listing.id}-rowline-${idx}`}
-                          className="pointer-events-none absolute left-0 right-0 border-b border-slate-100"
+                          className="pointer-events-none absolute left-0 right-0 border-b border-slate-200"
                           style={{
                             top: `${(idx + 1) * ROW_HEIGHT + (idx + 1) * ROW_GAP_PX}px`,
                           }}
@@ -603,11 +546,11 @@ export function LinearCalendar({
 
                       let bgClass: string;
                       if (selectionOverlayActive) {
-                        bgClass = "bg-[#FEDD02]/15";
+                        bgClass = "bg-yellow-100/50";
                       } else if (isToday) {
-                        bgClass = "bg-[#FEDD02]/15";
+                        bgClass = "bg-yellow-50/50";
                       } else if (isWeekend) {
-                        bgClass = "bg-slate-50/80";
+                        bgClass = "bg-slate-50";
                       } else if (isStripedColumn) {
                         bgClass = "bg-slate-50/40";
                       } else {
@@ -615,10 +558,10 @@ export function LinearCalendar({
                       }
 
                       const classNames = clsx(
-                        "timeline-hit relative flex h-full w-full flex-col justify-end border-r border-slate-200/70 px-2 py-2 text-[11px] font-medium transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-[#FEDD02]/40",
+                        "timeline-hit relative flex h-full w-full flex-col justify-end border-r border-slate-200 px-2 py-2 text-[11px] font-medium transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-yellow-200/60",
                         bgClass,
                         !selectable && "cursor-not-allowed text-slate-300",
-                        isToday && "border-r-[#0B0D10]/20"
+                        isToday && "border-r-yellow-200/70"
                       );
 
                       return (
@@ -677,7 +620,7 @@ export function LinearCalendar({
                           {hasHourlyIndicator && (
                             <span className="hourly-indicator absolute left-2 top-2 h-1.5 w-6 rounded-full bg-slate-400/70" />
                           )}
-                          {rate && (
+                          {showRates && rate && (
                             <span className="pointer-events-none inline-flex max-w-[90%] items-center justify-end self-end text-[11px] font-semibold text-slate-400 font-mono tabular-nums">
                               {currencySymbol}
                               {rate.price}
@@ -690,7 +633,7 @@ export function LinearCalendar({
                     {/* Selection overlay outline */}
                     {selectionOverlay && (
                       <div
-                        className="rounded-2xl border border-dashed border-[#FEDD02]/40 bg-[#FEDD02]/15"
+                        className="rounded-2xl border border-dashed border-yellow-200/70 bg-yellow-100/40"
                         style={{
                           gridColumnStart: selectionOverlay.startIdx + 1,
                           gridColumnEnd: selectionOverlay.endIdx + 2,
@@ -708,24 +651,7 @@ export function LinearCalendar({
                       const extendsBefore = bar.event.start < startDate;
                       const extendsAfter = displayEnd > rangeEnd;
 
-                      const hasConflict = rangeToDates(
-                        bar.event.start,
-                        displayEnd
-                      ).some((date) => {
-                        const iso = formatLocalDate(date);
-                        const entriesForDay =
-                          dayMapsByListing[bar.event.listingId]?.[iso] ?? [];
-                        return entriesForDay.some(
-                          (entry) => entry.id !== bar.event.id
-                        );
-                      });
-
                       const status = bar.event.meta?.status as BookingStatus | undefined;
-                      const isAwaitingPayment = status === "awaiting_payment";
-                      const isApproved = status === "approved";
-                      const isPaid = status === "paid";
-                      const isConfirmed = status === "confirmed";
-                      const isPaymentFailed = status === "payment_failed";
                       const isDeclined = status === "declined";
                       const isCancelled = status === "cancelled";
                       const isBlock = bar.event.meta?.kind === "block";
@@ -741,22 +667,19 @@ export function LinearCalendar({
                       ].includes(bar.event.source);
 
                       const channelMeta = getChannelMeta(bar.event.source, { isBlock });
-
+                      const guestName = bar.event.meta?.guestName?.trim() || "Guest";
+                      const guestFirstName = guestName.split(" ")[0] || "Guest";
+                      const primaryLabel = isBlock ? bar.event.label || "Blocked" : guestFirstName;
                       const barClassName = clsx(
-                        "timeline-bar relative flex h-9 items-center rounded-lg px-3 pr-7 text-[11px] font-medium shadow-sm overflow-hidden whitespace-nowrap",
+                        "timeline-bar relative flex h-9 items-center justify-between gap-2 rounded-md px-3 text-sm font-semibold text-slate-900 overflow-hidden whitespace-nowrap shadow-sm",
                         extendsBefore && "rounded-l-none",
                         extendsAfter && "rounded-r-none",
                         channelMeta.bgClass,
                         channelMeta.textClass,
-                        isAwaitingPayment && "ring-1 ring-slate-300/70",
-                        isApproved && "ring-1 ring-emerald-300/70",
-                        (isPaid || isConfirmed) && "ring-1 ring-emerald-400/80",
-                        isPaymentFailed && "bg-rose-50 text-rose-700 ring-1 ring-rose-300/80",
-                        isDeclined && "bg-slate-200 text-slate-500 line-through",
-                        isCancelled && "bg-slate-100 text-slate-400 line-through",
-                        isManualBlock && "border border-slate-200",
-                        isExternalBlock && "border border-slate-200",
-                        hasConflict && !isCancelled && !isDeclined && "ring-2 ring-rose-500/80"
+                        isDeclined && "opacity-50",
+                        isCancelled && "opacity-50",
+                        isManualBlock && "bg-slate-200 text-slate-900",
+                        isExternalBlock && "bg-slate-200 text-slate-900"
                       );
 
                       const barStyle: CSSProperties = {
@@ -782,119 +705,18 @@ export function LinearCalendar({
                           style={barStyle}
                           tabIndex={0}
                           onClick={() => onBookingClick?.(bar.event)}
-                          onMouseEnter={(event) =>
-                            showTooltip(listing.id, bar.event, event)
-                          }
-                          onFocus={(event) =>
-                            showTooltip(listing.id, bar.event, event)
-                          }
-                          onMouseLeave={hideTooltip}
-                          onBlur={hideTooltip}
                         >
-                          <span className="truncate">{bar.event.label}</span>
-                          {isAwaitingPayment && (
-                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-600">
-                              Awaiting payment
-                            </span>
-                          )}
-                          {isApproved && (
-                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-700">
-                              Approved
-                            </span>
-                          )}
-                          {(isPaid || isConfirmed) && (
-                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-700">
-                              Confirmed
-                            </span>
-                          )}
-                          {isPaymentFailed && (
-                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-rose-600">
-                              Payment failed
-                            </span>
-                          )}
-                          {isDeclined && (
-                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-600">
-                              Declined
-                            </span>
-                          )}
-                          {isCancelled && (
-                            <span className="ml-2 rounded-full bg-white/70 px-2 py-[1px] text-[9px] uppercase text-slate-600">
-                              Cancelled
-                            </span>
-                          )}
-
-                          <span className="absolute right-1 top-1">
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 ring-1 ring-black/10">
-                              <img
-                                src={channelMeta.badgeIcon}
-                                alt={channelMeta.label}
-                                className="h-4 w-4"
-                              />
-                            </span>
+                          <span className="truncate">{primaryLabel}</span>
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/90">
+                            <img
+                              src={channelMeta.badgeIcon}
+                              alt={channelMeta.label}
+                              className="h-3 w-3"
+                            />
                           </span>
                         </div>
                       );
                     })}
-
-                    {/* Tooltip */}
-                    {tooltip && tooltip.listingId === listing.id && (
-                      <div
-                        className="pointer-events-none fixed z-50 w-[240px] rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-xl"
-                        style={{
-                          left: Math.min(
-                            Math.max(tooltip.left - 120, tooltip.containerLeft),
-                            Math.max(
-                              tooltip.containerRight - 240,
-                              tooltip.containerLeft
-                            )
-                          ),
-                          top: Math.max(tooltip.top + 16, tooltip.containerTop),
-                        }}
-                      >
-                        {tooltip.event.badgeLabel && (
-                          <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400">
-                            {tooltip.event.badgeLabel}
-                          </p>
-                        )}
-                        <p className="text-sm font-semibold text-slate-900">
-                          {tooltip.event.label}
-                        </p>
-                        <p className="mt-1 text-[11px] text-slate-600">
-                          {formatRangeSummary(
-                            tooltip.event.start,
-                            getDisplayEnd(tooltip.event)
-                          )}
-                          {tooltip.event.meta?.nights
-                            ? ` · ${tooltip.event.meta.nights} night${
-                                tooltip.event.meta.nights > 1 ? "s" : ""
-                              }`
-                            : null}
-                        </p>
-                        {tooltip.event.meta?.nightlyRate && (
-                          <p className="text-[11px] text-slate-600">
-                            Nightly:{" "}
-                            {formatCurrency(
-                              tooltip.event.meta.nightlyRate,
-                              tooltip.event.meta.currency
-                            )}
-                          </p>
-                        )}
-                        {tooltip.event.meta?.total && (
-                          <p className="text-[11px] text-slate-600">
-                            Total:{" "}
-                            {formatCurrency(
-                              tooltip.event.meta.total,
-                              tooltip.event.meta.currency
-                            )}
-                          </p>
-                        )}
-                        {tooltip.event.meta?.reason && (
-                          <p className="mt-1 text-[11px] text-slate-500">
-                            Reason: {tooltip.event.meta.reason}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               );

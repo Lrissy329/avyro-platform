@@ -5,6 +5,7 @@ import Image from "next/image";
 import { Listing } from "@/types/Listing";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewSummaryLineFromScore } from "@/lib/reviews";
+import { computeGuestStayPricing } from "@/lib/pricing";
 
 const BUCKET = "listing-photos";
 const toPublicUrl = (pathOrUrl?: string | null): string | null => {
@@ -59,12 +60,15 @@ function normaliseType(value: unknown): string {
   return value.replace(/_/g, " ");
 }
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-GB", {
+const formatCurrency = (value: number) => {
+  const isWhole = Math.round(value * 100) % 100 === 0;
+  return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: "GBP",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: isWhole ? 0 : 2,
+    maximumFractionDigits: isWhole ? 0 : 2,
   }).format(value);
+};
 
 const shortLocation = (value: unknown) => {
   if (typeof value !== "string") return "";
@@ -106,7 +110,7 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
     (listing.booking_unit ?? listing.bookingUnit ?? (listing as any).booking_unit) === "hourly"
       ? "hourly"
       : "nightly";
-  const basePrice =
+  const hostBasePrice =
     bookingUnit === "hourly"
       ? toNumber((listing as any).price_per_hour) ??
         toNumber(listing.pricePerHour) ??
@@ -142,8 +146,19 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
       ? formatReviewSummaryLineFromScore(reviewOverall, reviewTotal)
       : null;
   const stayUnits = staySummary?.units ?? 0;
-  const showStayTotal = basePrice != null && stayUnits > 0;
-  const stayTotal = showStayTotal ? basePrice * stayUnits : null;
+  const resolvedUnits = stayUnits > 0 ? stayUnits : 1;
+  const stayPricing =
+    hostBasePrice != null
+      ? computeGuestStayPricing({
+          hostNetUnitMajor: hostBasePrice,
+          units: resolvedUnits,
+          bookingUnit,
+          isFirstCompletedBooking: false,
+        })
+      : null;
+  const guestUnitPrice = stayPricing?.guest_unit_avg_major ?? null;
+  const stayTotal = stayUnits > 0 ? stayPricing?.guest_total_major ?? null : null;
+  const showStayTotal = stayTotal != null;
 
   return (
     <Link
@@ -192,13 +207,15 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
                     </div>
                     <div className="text-xs text-[#4B5563]">
                       {stayUnits} {stayUnits === 1 ? unitLabel : `${unitLabel}s`},{" "}
-                      {formatCurrency(basePrice)} / {unitLabel}
+                      {guestUnitPrice != null
+                        ? `avg ${formatCurrency(guestUnitPrice)} / ${unitLabel}`
+                        : "All fees included"}
                     </div>
                   </>
-                ) : basePrice != null ? (
+                ) : guestUnitPrice != null ? (
                   <>
                     <div className="text-lg font-semibold text-neutral-900 font-mono tabular-nums">
-                      {formatCurrency(basePrice)} / {unitLabel}
+                      {formatCurrency(guestUnitPrice)} / {unitLabel}
                     </div>
                     <div className="text-xs text-[#4B5563]">All fees included</div>
                   </>

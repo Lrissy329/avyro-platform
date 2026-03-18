@@ -120,10 +120,19 @@ export default function LoginPage() {
     setLoading(true);
     setErrorMsg(null);
     try {
+      // Prevent stale local session reuse before OAuth redirect.
+      await supabase.auth.signOut({ scope: "local" });
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
           redirectTo: `${window.location.origin}/login?redirect=${encodeURIComponent(redirect || "/")}`,
+          queryParams:
+            provider === "google"
+              ? {
+                  prompt: "select_account",
+                }
+              : undefined,
         },
       });
       if (error) setErrorMsg(error.message);

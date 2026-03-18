@@ -21,6 +21,7 @@ type NavKey =
 type HostShellLayoutProps = {
   title?: string;
   activeNav?: NavKey;
+  variant?: "default" | "wide";
   children: ReactNode;
 };
 
@@ -43,7 +44,12 @@ const navItems: Array<{ key: NavKey; label: string; href: string; section: "Main
     { key: "settings", label: "Settings", href: "/host/settings", section: "Utility" },
   ];
 
-export function HostShellLayout({ title, activeNav, children }: HostShellLayoutProps) {
+export function HostShellLayout({
+  title,
+  activeNav,
+  variant = "default",
+  children,
+}: HostShellLayoutProps) {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -126,9 +132,21 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
     };
   }, [userId, refreshUnread]);
 
+  const normalizePath = useCallback((value: string) => {
+    const [withoutHash] = value.split("#");
+    const [withoutQuery] = withoutHash.split("?");
+    const trimmed = withoutQuery.replace(/\/+$/, "");
+    return trimmed || "/";
+  }, []);
+
+  const isCurrentPath = useCallback(
+    (href: string) => normalizePath(router.asPath) === normalizePath(href),
+    [normalizePath, router.asPath]
+  );
+
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white/95 px-4 pb-6 pt-4 lg:flex lg:flex-col">
+      <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white px-4 pb-6 pt-4 lg:flex lg:flex-col">
         <div className="flex items-center gap-2 px-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-xs font-semibold text-white">
             avy
@@ -152,23 +170,25 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
                     activeNav === item.key ||
                     (!activeNav && (router.pathname === item.href || router.pathname.startsWith(item.href)));
                   return (
-                    <Link key={item.href} href={item.href}>
-                      <button
-                        type="button"
-                        className={cn(
-                          "flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-colors",
-                          active
-                            ? "bg-slate-900 text-white shadow-[0_10px_30px_rgba(15,23,42,0.45)]"
-                            : "text-slate-500 hover:bg-slate-100"
-                        )}
-                      >
-                        <span>{item.label}</span>
-                        {item.key === "messages" && unreadCount > 0 ? (
-                          <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
-                            {unreadCount}
-                          </span>
-                        ) : null}
-                      </button>
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={(event) => {
+                        if (isCurrentPath(item.href)) event.preventDefault();
+                      }}
+                      className={cn(
+                        "relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition-colors",
+                        active
+                          ? "bg-slate-100 text-slate-900 font-medium before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:rounded-r before:bg-yellow-400"
+                          : "text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      <span>{item.label}</span>
+                      {item.key === "messages" && unreadCount > 0 ? (
+                        <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
+                          {unreadCount}
+                        </span>
+                      ) : null}
                     </Link>
                   );
                 })}
@@ -185,23 +205,25 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
                     activeNav === item.key ||
                     (!activeNav && (router.pathname === item.href || router.pathname.startsWith(item.href)));
                   return (
-                    <Link key={item.href} href={item.href}>
-                      <button
-                        type="button"
-                        className={cn(
-                          "flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-colors",
-                          active
-                            ? "bg-slate-900 text-white shadow-[0_10px_30px_rgba(15,23,42,0.45)]"
-                            : "text-slate-500 hover:bg-slate-100"
-                        )}
-                      >
-                        <span>{item.label}</span>
-                        {item.key === "messages" && unreadCount > 0 ? (
-                          <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
-                            {unreadCount}
-                          </span>
-                        ) : null}
-                      </button>
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={(event) => {
+                        if (isCurrentPath(item.href)) event.preventDefault();
+                      }}
+                      className={cn(
+                        "relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition-colors",
+                        active
+                          ? "bg-slate-100 text-slate-900 font-medium before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:rounded-r before:bg-yellow-400"
+                          : "text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      <span>{item.label}</span>
+                      {item.key === "messages" && unreadCount > 0 ? (
+                        <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
+                          {unreadCount}
+                        </span>
+                      ) : null}
                     </Link>
                   );
                 })}
@@ -218,23 +240,25 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
                     activeNav === item.key ||
                     (!activeNav && (router.pathname === item.href || router.pathname.startsWith(item.href)));
                   return (
-                    <Link key={item.href} href={item.href}>
-                      <button
-                        type="button"
-                        className={cn(
-                          "flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] font-medium transition-colors",
-                          active
-                            ? "bg-slate-900 text-white shadow-[0_10px_30px_rgba(15,23,42,0.45)]"
-                            : "text-slate-500 hover:bg-slate-100"
-                        )}
-                      >
-                        <span>{item.label}</span>
-                        {item.key === "messages" && unreadCount > 0 ? (
-                          <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
-                            {unreadCount}
-                          </span>
-                        ) : null}
-                      </button>
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={(event) => {
+                        if (isCurrentPath(item.href)) event.preventDefault();
+                      }}
+                      className={cn(
+                        "relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-[13px] transition-colors",
+                        active
+                          ? "bg-slate-100 text-slate-900 font-medium before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:rounded-r before:bg-yellow-400"
+                          : "text-slate-600 hover:bg-slate-100"
+                      )}
+                    >
+                      <span>{item.label}</span>
+                      {item.key === "messages" && unreadCount > 0 ? (
+                        <span className="ml-2 inline-flex min-w-[20px] items-center justify-center rounded-full bg-[#FEDD02] px-1.5 text-[10px] font-semibold text-slate-900">
+                          {unreadCount}
+                        </span>
+                      ) : null}
                     </Link>
                   );
                 })}
@@ -242,35 +266,24 @@ export function HostShellLayout({ title, activeNav, children }: HostShellLayoutP
           </div>
         </nav>
 
-        <div className="mt-4 flex items-center gap-3 rounded-xl bg-slate-100 px-3 py-2">
-          <Avatar className="h-8 w-8">
-            <AvatarImage src="/avatars/host-placeholder.svg" alt="Host" />
-            <AvatarFallback>H</AvatarFallback>
-          </Avatar>
-          <div className="flex flex-col">
-            <span className="text-xs font-medium text-slate-900">Your host account</span>
-            <span className="text-[11px] text-slate-500">View profile</span>
-          </div>
+        <div className="mt-4 text-xs text-slate-500">
+          Signed in as host.
         </div>
       </aside>
 
       <div className="flex min-h-screen flex-1 flex-col">
-        <header className="flex h-16 items-center justify-between border-b border-slate-200 bg-white/80 px-4 backdrop-blur-sm lg:px-8">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-lg font-semibold text-slate-900">{title ?? "Dashboard"}</h1>
-            <span className="hidden text-xs text-slate-500 sm:inline">
-              Monitor bookings, payouts & occupancy in one place.
-            </span>
+        <main className="flex-1">
+          <div
+            className={cn(
+              "mx-auto w-full py-8",
+              variant === "wide"
+                ? "max-w-none px-6 lg:px-8 2xl:px-10"
+                : "max-w-7xl px-8"
+            )}
+          >
+            {children}
           </div>
-          <div className="flex items-center gap-3">
-            <Avatar className="h-8 w-8 border border-slate-200">
-              <AvatarImage src="/avatars/host-placeholder.svg" alt="Host" />
-              <AvatarFallback>H</AvatarFallback>
-            </Avatar>
-          </div>
-        </header>
-
-        <main className="flex-1 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
+        </main>
       </div>
     </div>
   );

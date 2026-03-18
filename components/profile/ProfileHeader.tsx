@@ -76,7 +76,7 @@ export default function ProfileHeader({ profile, onSaveName, onUploadAvatar }: P
   const initials = (profile?.full_name || profile?.email || "U").slice(0, 2).toUpperCase();
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start gap-6">
         <div className="flex items-center gap-4">
           <Avatar className="h-16 w-16 border border-slate-200">

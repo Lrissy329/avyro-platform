@@ -365,7 +365,6 @@ export default function BookingWidget({
       ? checkOutDate
       : addDaysToDateInput(quoteCheckIn, 1);
 
-    const controller = new AbortController();
     let cancelled = false;
     const fetchQuote = async () => {
       if (cancelled) return;
@@ -380,7 +379,6 @@ export default function BookingWidget({
             checkIn: quoteCheckIn,
             checkOut: quoteCheckOut,
           }),
-          signal: controller.signal,
         });
         if (cancelled) return;
         const payload = await resp.json();
@@ -390,11 +388,7 @@ export default function BookingWidget({
         if (cancelled) return;
         setQuote(payload);
       } catch (e: any) {
-        const aborted =
-          e?.name === "AbortError" ||
-          controller.signal.aborted ||
-          (typeof e?.message === "string" && e.message.toLowerCase().includes("aborted"));
-        if (aborted || cancelled) return;
+        if (cancelled) return;
         setQuote(null);
         setQuoteError(e?.message ?? "Failed to fetch quote.");
       } finally {
@@ -406,13 +400,6 @@ export default function BookingWidget({
     fetchQuote();
     return () => {
       cancelled = true;
-      if (!controller.signal.aborted) {
-        try {
-          controller.abort();
-        } catch {
-          // Some environments throw on redundant/unsupported abort; ignore cleanup failures.
-        }
-      }
     };
   }, [checkInDate, checkOutDate, isHourlyStay, listingId]);
 
@@ -439,14 +426,15 @@ export default function BookingWidget({
     [hostNetUnitPence, stayTypeConfig.isHourly, billableNights]
   );
 
-  const guestUnitPrice = quote
-    ? quote.guest_unit_price_pence / 100
-    : fallbackUnitPrice;
-  const guestTotal = quote
-    ? quote.guest_total_pence / 100
-    : fallbackPricing
-    ? fallbackPricing.guest_total_pence / 100
-    : null;
+  const guestTotalPence = quote?.guest_total_pence ?? fallbackPricing?.guest_total_pence ?? null;
+  const guestTotal = guestTotalPence != null ? guestTotalPence / 100 : null;
+  const guestUnitPrice = useMemo(() => {
+    if (guestTotalPence != null && billableUnits > 0) {
+      return Math.round(guestTotalPence / billableUnits) / 100;
+    }
+    if (quote) return quote.guest_unit_price_pence / 100;
+    return fallbackUnitPrice;
+  }, [billableUnits, fallbackUnitPrice, guestTotalPence, quote]);
 
   const effectivePlatformFeeBps = quote?.platform_fee_bps ?? fallbackPricing?.platform_fee_bps ?? null;
   const platformFeeCapped = quote?.platform_fee_capped ?? fallbackPricing?.platform_fee_capped ?? false;
@@ -1008,12 +996,13 @@ export default function BookingWidget({
         {loading ? "Reserving…" : "Book this stay"}
       </Button>
 
-      {guestTotal != null && (
+      {guestTotal != null && billableUnits > 0 && (
         <div className="border-t border-slate-100 pt-4 text-sm text-muted-foreground space-y-1.5">
           <div className="text-slate-700">
             <span className="font-mono tabular-nums">
               {formatCurrency(guestUnitPrice ?? 0)}
-            </span>{" "}
+            </span>
+            {billableUnits > 1 ? " avg" : ""}{" "}
             × {formatUnits(billableUnits)}{" "}
             {stayTypeConfig.unitLabel}
             {billableUnits === 1 ? "" : "s"}

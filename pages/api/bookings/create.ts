@@ -145,32 +145,14 @@ export default async function handler(
     return res.status(409).json({ error: "Listing nightly price unavailable." });
   }
 
-  let isFirstCompletedBooking = false;
-  if (listingRow.user_id) {
-    const { count, error: bookingCountError } = await supabase
-      .from("bookings")
-      .select("id", { count: "exact", head: true })
-      .eq("host_id", listingRow.user_id)
-      .in("status", ["confirmed", "completed"]);
-    if (bookingCountError) {
-      console.error("[api/bookings/create] failed to check host bookings", bookingCountError);
-    } else {
-      isFirstCompletedBooking = (count ?? 0) === 0;
-    }
-  }
-
   const hostNetNightlyPence = Math.round(Number(nightlyMajor) * 100);
   const hostNetTotalPence = hostNetNightlyPence * nights;
   const pricing = computeAllInPricing({
     hostNetTotalPence,
     nights,
-    isFirstCompletedBooking,
+    isFirstCompletedBooking: false,
   });
-  const guestUnitPricePence = computeAllInPricing({
-    hostNetTotalPence: hostNetNightlyPence,
-    nights,
-    isFirstCompletedBooking,
-  }).guest_total_pence;
+  const guestUnitPricePence = Math.round(pricing.guest_total_pence / nights);
 
   const checkInTimeIso = new Date(`${checkIn}T00:00:00Z`).toISOString();
   const checkOutTimeIso = new Date(`${checkOut}T00:00:00Z`).toISOString();
@@ -210,6 +192,110 @@ export default async function handler(
     console.error("[api/bookings/create] failed to create booking", bookingError);
     return res.status(400).json({ error: bookingError?.message ?? "Failed to create booking." });
   }
+
+  const ensureBookingThread = async () => {
+    try {
+      const threadPayload = {
+        booking_id: bookingRow.id,
+        host_id: listingRow.user_id,
+        guest_id: userData.user.id,
+        last_message_at: null,
+      };
+
+      let threadId: string | null = null;
+
+      const upsertResult = await supabase
+        .from("conversations")
+        .upsert(threadPayload, { onConflict: "booking_id" })
+        .select("id")
+        .single();
+
+      if (upsertResult.error) {
+        const msg = String(upsertResult.error.message ?? "").toLowerCase();
+        if (msg.includes("no unique") || msg.includes("on conflict")) {
+          const existing = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("booking_id", bookingRow.id)
+            .maybeSingle();
+          threadId = existing.data?.id ?? null;
+          if (!threadId) {
+            const insertResult = await supabase
+              .from("conversations")
+              .insert(threadPayload)
+              .select("id")
+              .single();
+            threadId = insertResult.data?.id ?? null;
+          }
+        } else {
+          console.warn("[api/bookings/create] failed to upsert thread", upsertResult.error);
+        }
+      } else {
+        threadId = upsertResult.data?.id ?? null;
+      }
+
+      if (!threadId) return;
+
+      const { data: existingMessages } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("conversation_id", threadId)
+        .limit(1);
+
+      if (existingMessages && existingMessages.length > 0) return;
+
+      const guestName =
+        userData.user.user_metadata?.full_name ??
+        userData.user.user_metadata?.name ??
+        userData.user.email ??
+        "Guest";
+      const listingTitle = listingRow.title ?? "Listing";
+      const checkInLabel = checkIn;
+      const checkOutLabel = checkOut;
+      const summaryBody = `Booking created for ${checkInLabel} → ${checkOutLabel} (${nights} nights) at ${listingTitle}.\nGuest: ${guestName}.\nNext: Send check-in details and confirm ETA.`;
+
+      const systemPayload = {
+        conversation_id: threadId,
+        sender_id: null,
+        sender_role: "system",
+        body: summaryBody,
+      };
+
+      const insertResult = await supabase
+        .from("messages")
+        .insert(systemPayload)
+        .select("id, created_at")
+        .single();
+
+      if (insertResult.error) {
+        const fallback = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: threadId,
+            sender_id: listingRow.user_id,
+            body: summaryBody,
+          })
+          .select("id, created_at")
+          .single();
+
+        if (fallback.data?.created_at) {
+          await supabase
+            .from("conversations")
+            .update({ last_message_at: fallback.data.created_at })
+            .eq("id", threadId);
+        }
+      } else if (insertResult.data?.created_at) {
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: insertResult.data.created_at })
+          .eq("id", threadId);
+      }
+    } catch (err) {
+      console.warn("[api/bookings/create] thread creation failed", err);
+    }
+  };
+
+  await ensureBookingThread();
 
   const guestTotalPence = bookingRow.guest_total_pence;
   if (!Number.isInteger(guestTotalPence)) {

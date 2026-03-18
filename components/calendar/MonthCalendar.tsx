@@ -15,7 +15,7 @@ type MonthCalendarProps = {
 };
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const ROW_HEIGHT = 28;
+const ROW_HEIGHT = 30;
 
 export function MonthCalendar({
   listings,
@@ -41,17 +41,20 @@ export function MonthCalendar({
   );
 
   return (
-    <div className="mt-6 rounded-2xl border border-slate-200 bg-white">
+    <div className="min-h-[70vh] rounded-2xl border border-slate-200 bg-white shadow-sm p-3">
       <div className="flex">
-        <div className="sticky left-0 z-20 w-52 shrink-0 border-r border-slate-200 bg-white">
-          <div className="flex items-center border-b-2 border-slate-200 bg-slate-50/80 px-3 text-xs font-semibold text-slate-500" style={{ height: `${ROW_HEIGHT}px` }}>
+        <div className="sticky left-0 z-20 w-44 shrink-0 border-r border-slate-200 bg-white">
+          <div
+            className="flex items-center border-b-2 border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700"
+            style={{ height: `${ROW_HEIGHT}px` }}
+          >
             {monthKey}
           </div>
           {listings.map((listing, index) => (
             <div
               key={listing.id}
               className={clsx(
-                "flex items-center border-b-2 border-slate-200 bg-white px-3 text-xs font-medium text-slate-800",
+                "flex items-center border-b-2 border-slate-200 bg-white px-3 text-xs text-slate-500",
                 index % 2 === 1 && "bg-slate-50/60"
               )}
               style={{ height: `${ROW_HEIGHT * 6}px` }}
@@ -63,11 +66,11 @@ export function MonthCalendar({
 
         <div className="flex-1">
           <div
-            className="grid border-b-2 border-slate-200 bg-white text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400"
+            className="grid border-b-2 border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-700"
             style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))", height: `${ROW_HEIGHT}px` }}
           >
             {WEEKDAYS.map((day) => (
-              <div key={day} className="flex items-center justify-center border-r border-slate-100">
+              <div key={day} className="flex items-center justify-center border-r border-slate-200">
                 {day}
               </div>
             ))}
@@ -109,10 +112,10 @@ export function MonthCalendar({
                       type="button"
                       onClick={() => onDayClick?.(day, listing.id)}
                       className={clsx(
-                        "relative flex h-full w-full flex-col items-end justify-start border-b border-r border-slate-100 px-2 py-1 text-[11px] leading-tight",
+                        "relative flex h-full w-full flex-col items-end justify-start border-b border-r border-slate-200 px-2 py-1 text-[11px] leading-tight",
                         stateClass,
                         !isInMonth && "text-slate-300",
-                        isToday && "ring-1 ring-[#0B0D10]/40"
+                        isToday && "bg-yellow-50/50 ring-1 ring-yellow-200/60"
                       )}
                       style={{ minHeight: `${ROW_HEIGHT}px` }}
                     >

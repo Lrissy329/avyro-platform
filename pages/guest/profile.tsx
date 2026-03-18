@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { supabase } from "@/lib/supabaseClient";
-import { ensureProfile } from "@/lib/ensureProfile";
-import { AppHeader } from "@/components/AppHeader";
+
+import GuestVerificationPanel, {
+  type GuestVerification,
+} from "@/components/profile/GuestVerificationPanel";
 import ProfileHeader, { type ProfileHeaderProfile } from "@/components/profile/ProfileHeader";
-import GuestVerificationPanel, { type GuestVerification } from "@/components/profile/GuestVerificationPanel";
+import { ensureProfile } from "@/lib/ensureProfile";
+import { supabase } from "@/lib/supabaseClient";
+import { GuestPageHeader } from "@/components/guest/GuestPageHeader";
+import { GuestShellLayout } from "@/components/guest/GuestShellLayout";
 
 export default function GuestProfilePage() {
   const router = useRouter();
@@ -12,7 +16,7 @@ export default function GuestProfilePage() {
   const [verification, setVerification] = useState<GuestVerification | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -36,8 +40,7 @@ export default function GuestProfilePage() {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    const fallbackAvatar =
-      user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? null;
+    const fallbackAvatar = user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? null;
 
     const profileData = profileRow
       ? {
@@ -51,17 +54,18 @@ export default function GuestProfilePage() {
           verification_level: 0,
           verification_status: "unverified",
         };
+
     setProfile({
       ...profileData,
       email: user.email ?? null,
     });
     setVerification((verificationRow as GuestVerification) ?? null);
     setLoading(false);
-  };
+  }, [router]);
 
   useEffect(() => {
-    loadProfile();
-  }, []);
+    loadProfile().catch(() => null);
+  }, [loadProfile]);
 
   const handleSaveName = async (name: string) => {
     if (!profile?.id) return;
@@ -73,50 +77,55 @@ export default function GuestProfilePage() {
   const handleAvatarUpload = async (file: File) => {
     if (!profile?.id) return;
     const path = `${profile.id}/avatar.jpg`;
+
     const { error: uploadError } = await supabase.storage
       .from("avatars")
       .upload(path, file, { upsert: true });
+
     if (uploadError) throw new Error(uploadError.message);
 
     const { data } = supabase.storage.from("avatars").getPublicUrl(path);
     const avatarUrl = data?.publicUrl ?? null;
+
     const { error: updateError } = await supabase
       .from("profiles")
       .update({ avatar_url: avatarUrl })
       .eq("id", profile.id);
+
     if (updateError) throw new Error(updateError.message);
     setProfile((prev) => (prev ? { ...prev, avatar_url: avatarUrl } : prev));
   };
 
-  if (loading) {
-    return <main className="min-h-screen bg-slate-50 p-6 text-slate-600">Loading profile…</main>;
-  }
-
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <AppHeader />
-      <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
-        <div>
-          <h1 className="text-3xl font-semibold text-slate-900">Your profile</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Manage your work verification and guest settings.
-          </p>
-        </div>
-
-        <ProfileHeader
-          profile={profile}
-          onSaveName={handleSaveName}
-          onUploadAvatar={handleAvatarUpload}
+    <GuestShellLayout activeNav="profile" title="Profile">
+      <div className="space-y-8">
+        <GuestPageHeader
+          title="Profile"
+          description="Manage your name, contact details, and verification status."
         />
 
-        {profile?.id ? (
-          <GuestVerificationPanel
-            userId={profile.id}
-            verification={verification}
-            onRefresh={loadProfile}
-          />
-        ) : null}
+        {loading ? (
+          <main className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+            Loading profile…
+          </main>
+        ) : (
+          <>
+            <ProfileHeader
+              profile={profile}
+              onSaveName={handleSaveName}
+              onUploadAvatar={handleAvatarUpload}
+            />
+
+            {profile?.id ? (
+              <GuestVerificationPanel
+                userId={profile.id}
+                verification={verification}
+                onRefresh={loadProfile}
+              />
+            ) : null}
+          </>
+        )}
       </div>
-    </main>
+    </GuestShellLayout>
   );
 }

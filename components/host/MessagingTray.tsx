@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 
 type Message = {
   id: string;
-  sender_id: string;
+  sender_id: string | null;
+  sender_role?: string | null;
   body: string;
   created_at: string;
 };
@@ -75,12 +76,22 @@ export function MessagingTray({
     setLoading(true);
     const { data, error } = await supabase
       .from("messages")
-      .select("id, sender_id, body, created_at")
+      .select("id, sender_id, sender_role, body, created_at")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true });
 
     if (error) {
-      console.error("Failed to load messages", error.message);
+      const fallback = await supabase
+        .from("messages")
+        .select("id, sender_id, body, created_at")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: true });
+      if (fallback.error) {
+        console.error("Failed to load messages", fallback.error.message);
+        setLoading(false);
+        return;
+      }
+      setMessages((fallback.data as Message[]) ?? []);
       setLoading(false);
       return;
     }
@@ -133,6 +144,17 @@ export function MessagingTray({
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onOpenChange(false);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [open, onOpenChange]);
+
   const handleSend = useCallback(async () => {
     if (!conversationId || !draft.trim()) return;
     const body = draft.trim();
@@ -150,11 +172,35 @@ export function MessagingTray({
           conversation_id: conversationId,
           body,
           sender_id: senderId,
+          sender_role: "host",
         })
-        .select("id, sender_id, body, created_at")
+        .select("id, sender_id, sender_role, body, created_at")
         .single();
 
-      if (error) throw error;
+      if (error) {
+        const fallback = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversationId,
+            body,
+            sender_id: senderId,
+          })
+          .select("id, sender_id, body, created_at")
+          .single();
+        if (fallback.error) throw fallback.error;
+
+        if (fallback.data) {
+          setMessages((prev) => [...prev, fallback.data as Message]);
+          await supabase
+            .from("conversations")
+            .update({ last_message_at: (fallback.data as Message).created_at })
+            .eq("id", conversationId);
+          await markConversationRead(conversationId);
+        }
+
+        setDraft("");
+        return;
+      }
 
       if (data) {
         setMessages((prev) => [...prev, data as Message]);
@@ -177,14 +223,24 @@ export function MessagingTray({
   const bookingText = bookingLabel ?? "";
 
   return (
-    <div
-      className={cn(
-        "fixed right-0 top-0 z-40 h-full w-full max-w-[380px] translate-x-full border-l border-slate-200 bg-white shadow-2xl transition-transform duration-200",
-        open && "translate-x-0"
-      )}
-      aria-hidden={!open}
-    >
-      <div className="flex h-full flex-col">
+    <>
+      <div
+        className={cn(
+          "fixed inset-0 z-30 bg-black/20 opacity-0 transition-opacity duration-200",
+          open && "pointer-events-auto opacity-100",
+          !open && "pointer-events-none"
+        )}
+        onClick={() => onOpenChange(false)}
+        aria-hidden={!open}
+      />
+      <div
+        className={cn(
+          "fixed right-0 top-0 z-40 h-full w-full max-w-[380px] translate-x-full border-l border-slate-200 bg-white shadow-2xl transition-transform duration-200",
+          open && "translate-x-0"
+        )}
+        aria-hidden={!open}
+      >
+        <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <div>
             <p className="text-sm font-semibold text-slate-900">{headerTitle}</p>
@@ -209,28 +265,35 @@ export function MessagingTray({
           ) : (
             <div className="space-y-3">
               {messages.map((message) => {
-                const isMine = message.sender_id === userId;
+                const senderRole =
+                  message.sender_role ??
+                  (message.sender_id === userId ? "host" : "guest");
+                const isSystemBody = message.body?.toLowerCase().startsWith("booking created");
+                const isSystem =
+                  senderRole === "system" || !message.sender_id || isSystemBody;
+                const isHost = senderRole === "host";
                 return (
                   <div
                     key={message.id}
-                    className={cn(
-                      "flex flex-col",
-                      isMine ? "items-end" : "items-start"
-                    )}
+                    className={cn("flex flex-col", isSystem ? "items-center" : isHost ? "items-end" : "items-start")}
                   >
                     <div
                       className={cn(
-                        "max-w-[80%] rounded-2xl px-3 py-2 text-sm",
-                        isMine
-                          ? "bg-slate-900 text-white"
-                          : "bg-slate-100 text-slate-700"
+                        "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
+                        isSystem
+                          ? "border border-slate-200 bg-slate-50 text-slate-600 text-center"
+                          : isHost
+                            ? "border border-yellow-200 bg-yellow-50 text-slate-900"
+                            : "bg-slate-100 text-slate-700"
                       )}
                     >
                       {message.body}
                     </div>
-                    <span className="mt-1 text-[10px] text-slate-400">
-                      {formatMessageTime(message.created_at)}
-                    </span>
+                    {!isSystem ? (
+                      <span className="mt-1 text-[10px] text-slate-400">
+                        {formatMessageTime(message.created_at)}
+                      </span>
+                    ) : null}
                   </div>
                 );
               })}
@@ -245,7 +308,7 @@ export function MessagingTray({
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Write a message…"
-              className="min-h-[60px] flex-1 resize-none"
+              className="min-h-[44px] flex-1 resize-none rounded-2xl border border-slate-200"
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -257,9 +320,10 @@ export function MessagingTray({
               type="button"
               onClick={handleSend}
               disabled={!draft.trim() || sending}
-              className="h-10 px-3"
+              className="h-11 px-4 rounded-xl"
             >
               <PaperAirplaneIcon className="h-4 w-4" />
+              <span className="text-sm">{sending ? "Sending…" : "Send"}</span>
             </Button>
           </div>
           <p className="mt-2 text-[11px] text-slate-400">
@@ -268,5 +332,6 @@ export function MessagingTray({
         </div>
       </div>
     </div>
+    </>
   );
 }

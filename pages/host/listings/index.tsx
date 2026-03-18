@@ -6,6 +6,7 @@ import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
+import { HostPageHeader } from "@/components/host/HostPageHeader";
 
 type ListingSummary = {
   id: string;
@@ -38,57 +39,73 @@ export default function HostListingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
     const loadListings = async () => {
       setLoading(true);
       setError(null);
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        const fallbackSession = await supabase.auth.getSession();
+        const userId = userData.user?.id ?? fallbackSession.data.session?.user?.id ?? null;
 
-      const { data, error: fetchError } = await supabase
-        .from("listings")
-        .select(
-          "id, title, location, booking_unit, rental_type, price_per_night, price_per_hour, created_at"
-        )
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
+        if (!userId) {
+          if (!isMounted) return;
+          setLoading(false);
+          router.replace("/login?redirect=%2Fhost%2Flistings");
+          return;
+        }
 
-      if (fetchError) {
-        setError(fetchError.message);
+        const { data, error: fetchError } = await supabase
+          .from("listings")
+          .select(
+            "id, title, location, booking_unit, rental_type, price_per_night, price_per_hour, created_at"
+          )
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false });
+
+        if (!isMounted) return;
+        if (fetchError) {
+          setError(fetchError.message);
+          setListings([]);
+        } else {
+          setListings((data as ListingSummary[]) ?? []);
+        }
+      } catch (error: any) {
+        if (!isMounted) return;
+        setError(error?.message ?? "Failed to load listings.");
         setListings([]);
-      } else {
-        setListings((data as ListingSummary[]) ?? []);
       }
 
-      setLoading(false);
+      if (isMounted) setLoading(false);
     };
 
     loadListings();
+    return () => {
+      isMounted = false;
+    };
   }, [router]);
 
   const listingCount = useMemo(() => listings.length, [listings.length]);
 
   return (
     <HostShellLayout title="Listings" activeNav="listings">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-slate-900">Your listings</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Manage availability, pricing, and listing details in one place.
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/host/create-listing">New listing</Link>
-        </Button>
-      </div>
+      <div className="space-y-8">
+        <HostPageHeader
+          title="Listings"
+          description="Manage availability, pricing, and listing details in one place."
+          actions={
+            <Button
+              asChild
+              className="rounded-xl bg-slate-900 px-4 py-2 text-white hover:bg-slate-800"
+            >
+              <Link href="/host/create-listing">New listing</Link>
+            </Button>
+          }
+        />
 
-      <Card className="rounded-2xl border-slate-200 px-6 py-5">
+        <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         {loading ? (
           <p className="text-sm text-slate-500">Loading listings…</p>
         ) : error ? (
@@ -102,48 +119,58 @@ export default function HostListingsPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+            <p className="text-xs uppercase tracking-wider text-slate-500">
               {listingCount} listing{listingCount === 1 ? "" : "s"}
             </p>
-            <div className="grid gap-4">
+            <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs uppercase tracking-wider text-slate-500">
+                <span>Listing</span>
+                <span>Type</span>
+                <span>Price</span>
+                <span>Actions</span>
+              </div>
               {listings.map((listing) => {
                 const unit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
-                const price =
-                  unit === "hourly" ? listing.price_per_hour : listing.price_per_night;
+                const price = unit === "hourly" ? listing.price_per_hour : listing.price_per_night;
                 return (
                   <div
                     key={listing.id}
-                    className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-4"
+                    className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-4 border-b border-slate-100 px-4 py-3 text-sm hover:bg-slate-50"
                   >
-                    <div className="min-w-[220px] flex-1">
-                      <p className="text-sm font-semibold text-slate-900 font-display">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">
                         {listing.title ?? "Untitled listing"}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="text-xs text-slate-500">
                         {listing.location ?? "Location not set"}
                       </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                          {unit === "hourly" ? "Hourly" : "Nightly"}
-                        </span>
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                          {formatLabel(listing.rental_type)}
-                        </span>
-                      </div>
                     </div>
-
-                    <div className="min-w-[180px] text-sm text-slate-600 font-mono tabular-nums">
+                    <div className="text-sm text-slate-600">
+                      {unit === "hourly" ? "Hourly" : "Nightly"} · {formatLabel(listing.rental_type)}
+                    </div>
+                    <div className="text-sm text-slate-600 font-mono tabular-nums">
                       {formatPrice(price ?? null, unit)}
                     </div>
-
                     <div className="flex flex-wrap items-center gap-2">
-                      <Button asChild size="sm" variant="outline">
+                      <Button
+                        asChild
+                        size="sm"
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-slate-800 hover:bg-slate-50"
+                      >
                         <Link href={`/listing/${listing.id}`}>View</Link>
                       </Button>
-                      <Button asChild size="sm" variant="secondary">
+                      <Button
+                        asChild
+                        size="sm"
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-slate-800 hover:bg-slate-50"
+                      >
                         <Link href={`/listing/${listing.id}/edit`}>Edit</Link>
                       </Button>
-                      <Button asChild size="sm" variant="outline">
+                      <Button
+                        asChild
+                        size="sm"
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-slate-800 hover:bg-slate-50"
+                      >
                         <Link href={`/host/listings/${listing.id}/pricing`}>Pricing</Link>
                       </Button>
                     </div>
@@ -153,7 +180,8 @@ export default function HostListingsPage() {
             </div>
           </div>
         )}
-      </Card>
+        </Card>
+      </div>
     </HostShellLayout>
   );
 }

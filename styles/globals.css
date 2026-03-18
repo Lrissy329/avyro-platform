@@ -125,6 +125,32 @@ html, body, #__next { height: 100%; }
 .mapboxgl-popup { max-width: 260px; }
 .mapboxgl-canvas { outline: none; }
 
+.map-uber .mapboxgl-ctrl-group {
+  border: 0;
+  border-radius: 9999px;
+  overflow: hidden;
+  box-shadow: 0 10px 24px rgba(11, 13, 16, 0.24);
+}
+
+.map-uber .mapboxgl-ctrl-group button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: #fff;
+}
+
+.map-uber .mapboxgl-ctrl-group button + button {
+  border-top: 1px solid rgba(11, 13, 16, 0.08);
+}
+
+.map-uber .mapboxgl-ctrl-attrib {
+  border-radius: 9999px;
+  margin: 10px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.88);
+  color: rgba(11, 13, 16, 0.7);
+}
+
 /* Host availability calendar */
 .host-calendar .hero-month-picker {
   width: 100%;
@@ -816,6 +842,249 @@ html, body, #__next { height: 100%; }
   top: 50%;
   height: 1px;
   background-color: rgba(11, 13, 16, 0.45);
+}
+
+.avyro-daypilot-scheduler [class*="scheduler_default"] {
+  font-family: inherit;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_main {
+  border: 0 !important;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_corner,
+.avyro-daypilot-scheduler .scheduler_default_corner_inner {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  position: sticky;
+  left: 0;
+  z-index: 7;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_scrollable {
+  background: #ffffff;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_rowheader {
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  box-shadow: 1px 0 0 #e2e8f0;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_rowheader_inner {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.3;
+  max-height: 2.6em;
+  padding: 0 12px 0 18px;
+  position: relative;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_rowheader_inner::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: #94a3b8;
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.avyro-daypilot-scheduler .scheduler_default_timeheadergroup,
+.avyro-daypilot-scheduler .scheduler_default_timeheadercol {
+  background: #f8fafc;
+  color: #475569;
+  border-color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_cell {
+  border-color: #e2e8f0;
+  transition: background-color 150ms ease;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_cell:hover {
+  background: #f8fafc;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell .avyro-dp-cell-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 8px 6px;
+  pointer-events: none;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell .avyro-dp-cell-rate {
+  font-size: 13px;
+  line-height: 1.15;
+  color: #334155;
+  font-weight: 650;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell-marker {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell-marker--booked {
+  background: #0f172a;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell-marker--blocked {
+  background: #64748b;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell--today {
+  background: #f8fafc;
+  box-shadow: inset 0 0 0 1px #cbd5e1;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell--weekend {
+  background: #fbfcff;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell--booked {
+  background: #f8fafc;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-cell--blocked {
+  background: #f1f5f9;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event {
+  border-radius: 12px !important;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.14);
+  border-width: 0 !important;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 14px rgba(15, 23, 42, 0.18);
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event .scheduler_default_event_inner {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding-right: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event--selected {
+  outline: 2px solid rgba(15, 23, 42, 0.35);
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-direct {
+  background: linear-gradient(180deg, #0f172a 0%, #111b36 100%) !important;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-airbnb {
+  background: linear-gradient(180deg, #f43f5e 0%, #e11d48 100%) !important;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-vrbo {
+  background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%) !important;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-booking {
+  background: linear-gradient(180deg, #1d4ed8 0%, #1e40af 100%) !important;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-expedia {
+  background: linear-gradient(180deg, #0f766e 0%, #0f766e 100%) !important;
+}
+
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-manual,
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-other,
+.avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-block {
+  background: linear-gradient(180deg, #64748b 0%, #475569 100%) !important;
+}
+
+.avyro-daypilot-scheduler .calendar_default_main,
+.avyro-daypilot-scheduler .month_default_main {
+  border: 0 !important;
+}
+
+.avyro-daypilot-scheduler .calendar_default_colheader,
+.avyro-daypilot-scheduler .calendar_default_corner,
+.avyro-daypilot-scheduler .calendar_default_cornerright,
+.avyro-daypilot-scheduler .calendar_default_rowheader {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.avyro-daypilot-scheduler .calendar_default_cell {
+  border-color: #e2e8f0;
+}
+
+.avyro-daypilot-scheduler .calendar_default_event_inner {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.avyro-daypilot-scheduler .month_default_header,
+.avyro-daypilot-scheduler .month_default_cell_header {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+.avyro-daypilot-scheduler .month_default_cell {
+  border-color: #e2e8f0;
+}
+
+.avyro-daypilot-scheduler .month_default_event_inner {
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.avyro-daypilot-scheduler .avyro-dp-event-badge__inner {
+  width: 19px;
+  height: 19px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.bubble_default_main .avyro-dp-tooltip__name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.bubble_default_main .avyro-dp-tooltip__meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #475569;
 }
 
 @layer base {

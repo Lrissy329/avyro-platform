@@ -63,7 +63,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const { data: listingRow, error: listingError } = await supabase
     .from("listings")
-    .select("id, user_id, rental_type, booking_unit, is_instant_book, is_crew_ready")
+    .select("id, user_id, title, rental_type, booking_unit, is_instant_book, is_crew_ready")
     .eq("id", listingId)
     .maybeSingle();
 
@@ -137,6 +137,101 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.error("[api/bookings] failed to create booking", error);
     return res.status(400).json({ error: error.message });
   }
+
+  const ensureBookingThread = async () => {
+    try {
+      const threadPayload = {
+        booking_id: data.id,
+        host_id: listingRow.user_id,
+        guest_id: guestId,
+        last_message_at: null,
+      };
+
+      let threadId: string | null = null;
+
+      const upsertResult = await supabase
+        .from("conversations")
+        .upsert(threadPayload, { onConflict: "booking_id" })
+        .select("id")
+        .single();
+
+      if (upsertResult.error) {
+        const msg = String(upsertResult.error.message ?? "").toLowerCase();
+        if (msg.includes("no unique") || msg.includes("on conflict")) {
+          const existing = await supabase
+            .from("conversations")
+            .select("id")
+            .eq("booking_id", data.id)
+            .maybeSingle();
+          threadId = existing.data?.id ?? null;
+          if (!threadId) {
+            const insertResult = await supabase
+              .from("conversations")
+              .insert(threadPayload)
+              .select("id")
+              .single();
+            threadId = insertResult.data?.id ?? null;
+          }
+        } else {
+          console.warn("[api/bookings] failed to upsert thread", upsertResult.error);
+        }
+      } else {
+        threadId = upsertResult.data?.id ?? null;
+      }
+
+      if (!threadId) return;
+
+      const { data: existingMessages } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("conversation_id", threadId)
+        .limit(1);
+
+      if (existingMessages && existingMessages.length > 0) return;
+
+      const summaryBody = `Booking created for ${checkInTime} → ${checkOutTime} at ${
+        listingRow.title ?? "Listing"
+      }.\nNext: Send check-in details and confirm ETA.`;
+
+      const insertResult = await supabase
+        .from("messages")
+        .insert({
+          conversation_id: threadId,
+          sender_id: null,
+          sender_role: "system",
+          body: summaryBody,
+        })
+        .select("id, created_at")
+        .single();
+
+      if (insertResult.error) {
+        const fallback = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: threadId,
+            sender_id: listingRow.user_id,
+            body: summaryBody,
+          })
+          .select("id, created_at")
+          .single();
+        if (fallback.data?.created_at) {
+          await supabase
+            .from("conversations")
+            .update({ last_message_at: fallback.data.created_at })
+            .eq("id", threadId);
+        }
+      } else if (insertResult.data?.created_at) {
+        await supabase
+          .from("conversations")
+          .update({ last_message_at: insertResult.data.created_at })
+          .eq("id", threadId);
+      }
+    } catch (err) {
+      console.warn("[api/bookings] thread creation failed", err);
+    }
+  };
+
+  await ensureBookingThread();
 
   return res.status(201).json({ booking: data });
 }

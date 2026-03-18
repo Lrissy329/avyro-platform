@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { MapRef } from "react-map-gl";
 import { computeGuestTotalMajorFromHostNet } from "@/lib/pricing";
 
 const MapGL = dynamic(() => import("react-map-gl").then((m: any) => m.default ?? m.Map), {
@@ -43,6 +42,7 @@ type AeronoocMapProps = {
   showAirportLabel?: boolean;
   mapboxAccessToken?: string;
   mapStyle?: string;
+  theme?: "default" | "uber";
   style?: CSSProperties;
   className?: string;
   height?: number;
@@ -108,19 +108,35 @@ function MarkerDot({
   children,
   active,
   hovered,
+  theme,
 }: {
   children: ReactNode;
   active: boolean;
   hovered: boolean;
+  theme: "default" | "uber";
 }) {
   const base =
-    "relative inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm transition-transform duration-150 bg-[#FEDD02] text-black border-[#FEDD02]";
-  const stateClass = active
-    ? "scale-105 ring-1 ring-black/30"
-    : hovered
-    ? "scale-[1.04] ring-1 ring-black/20"
-    : "";
-  const pointerClass = "bg-[#FEDD02] border-[#FEDD02]";
+    theme === "uber"
+      ? "relative inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold shadow-[0_8px_20px_rgba(11,13,16,0.24)] transition-transform duration-150 bg-white text-[#0B0D10] border-white"
+      : "relative inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm transition-transform duration-150 bg-[#FEDD02] text-black border-[#FEDD02]";
+  const stateClass =
+    theme === "uber"
+      ? active
+        ? "scale-105 bg-[#0B0D10] text-white border-[#0B0D10]"
+        : hovered
+        ? "scale-[1.04]"
+        : ""
+      : active
+      ? "scale-105 ring-1 ring-black/30"
+      : hovered
+      ? "scale-[1.04] ring-1 ring-black/20"
+      : "";
+  const pointerClass =
+    theme === "uber"
+      ? active
+        ? "bg-[#0B0D10] border-[#0B0D10]"
+        : "bg-white border-white"
+      : "bg-[#FEDD02] border-[#FEDD02]";
   return (
     <span className={`${base} ${stateClass}`}>
       {children}
@@ -162,6 +178,7 @@ export default function AeronoocMap({
   showAirportLabel = true,
   mapboxAccessToken,
   mapStyle = "mapbox://styles/mapbox/navigation-day-v1",
+  theme = "default",
   style,
   className,
   height,
@@ -177,7 +194,7 @@ export default function AeronoocMap({
   fitToPins = true,
 }: AeronoocMapProps) {
   const token = mapboxAccessToken || process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  const mapRef = useRef<MapRef | null>(null);
+  const mapRef = useRef<any>(null);
   const lastFitRef = useRef<string>("");
   const [mapReady, setMapReady] = useState(false);
   const [viewState, setViewState] = useState(() => ({
@@ -385,13 +402,27 @@ export default function AeronoocMap({
 
   return (
     <div
-      className={`relative h-full w-full rounded-3xl border border-neutral-200 bg-white shadow-md overflow-hidden ${
-        className ?? ""
-      }`}
+      className={
+        theme === "uber"
+          ? `map-uber relative h-full w-full overflow-hidden ${className ?? ""}`
+          : `relative h-full w-full rounded-3xl border border-neutral-200 bg-white shadow-md overflow-hidden ${
+              className ?? ""
+            }`
+      }
       style={resolvedStyle}
     >
+      {theme === "uber" && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-gradient-to-b from-white/55 to-transparent" />
+      )}
+
       {showAirportLabel && airportCode && airportCoords && (
-        <div className="pointer-events-none absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-full bg-white/95 px-3.5 py-2 text-sm font-semibold text-neutral-900 shadow-md border border-neutral-200">
+        <div
+          className={
+            theme === "uber"
+              ? "pointer-events-none absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 text-xs font-semibold text-neutral-900 shadow border border-neutral-200"
+              : "pointer-events-none absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-full bg-white/95 px-3.5 py-2 text-sm font-semibold text-neutral-900 shadow-md border border-neutral-200"
+          }
+        >
           <span className="text-neutral-500">✈</span>
           <span>
             {airportLabel ? (
@@ -424,7 +455,10 @@ export default function AeronoocMap({
         style={{ width: "100%", height: "100%" }}
         className="w-full h-full"
       >
-        <NavigationControl position="top-left" style={{ margin: 16, zIndex: 10 }} />
+        <NavigationControl
+          position={theme === "uber" ? "bottom-right" : "top-left"}
+          style={{ margin: 16, zIndex: theme === "uber" ? 12 : 10 }}
+        />
 
         {markerPins.map((pin) => {
           const isHover = hoverId === pin.id;
@@ -445,7 +479,7 @@ export default function AeronoocMap({
                 onClick={() => handleSelect(pin.id)}
                 className="bg-transparent border-0 p-0 cursor-pointer focus:outline-none"
               >
-                <MarkerDot active={isActive} hovered={isHover}>
+                <MarkerDot active={isActive} hovered={isHover} theme={theme}>
                   <span className="font-mono tabular-nums">
                     {pin.nightly != null ? `£${Math.round(pin.nightly)}` : pin.title}
                   </span>
@@ -481,7 +515,7 @@ export default function AeronoocMap({
             {onMarkerDragEnd ? (
               <DragPin />
             ) : (
-              <MarkerDot active hovered>
+              <MarkerDot active hovered theme={theme}>
                 {markerPins.length ? "Adjust location" : "You are here"}
               </MarkerDot>
             )}

@@ -272,7 +272,12 @@ export default function SearchPage() {
       q.access_24_7,
       q.commute_max,
     ];
-    return flags.filter((value) => value !== undefined && value !== "" && value !== false).length;
+    return flags.filter((value) => {
+      if (value == null) return false;
+      if (typeof value === "boolean") return value;
+      if (typeof value === "string") return value.trim().length > 0;
+      return true;
+    }).length;
   }, [q]);
 
   const emptyModeLabel = useMemo(() => {
@@ -483,6 +488,43 @@ export default function SearchPage() {
     const wantedType = (roomType && typeMap[roomType]) || undefined;
     const airportFilter = (q.airport || "").trim().toUpperCase();
     const effectiveAirport = (airportCode || airportFilter).trim().toUpperCase();
+    const selectedCheckInDate = q.checkIn.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? "";
+    const selectedCheckOutDate = q.checkOut.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? "";
+    const hasSelectedDates = Boolean(selectedCheckInDate && selectedCheckOutDate);
+    const toLocalIso = (dateStr: string, timeStr?: string) => {
+      const [year, month, day] = dateStr.split("-").map(Number);
+      const [hours, minutes] =
+        (timeStr ?? "")
+          .split(":")
+          .map((value) => Number(value))
+          .slice(0, 2);
+      const local = new Date(
+        year ?? 0,
+        (month ?? 1) - 1,
+        day ?? 1,
+        Number.isFinite(hours) ? hours : 0,
+        Number.isFinite(minutes) ? minutes : 0
+      );
+      return local.toISOString();
+    };
+
+    const selectedCheckInIso = hasSelectedDates
+      ? toLocalIso(selectedCheckInDate, q.checkInTime || undefined)
+      : "";
+    const selectedCheckOutIso = hasSelectedDates
+      ? toLocalIso(selectedCheckOutDate, q.checkOutTime || undefined)
+      : "";
+    const hasValidSelectedWindow =
+      hasSelectedDates &&
+      Number.isFinite(new Date(selectedCheckInIso).getTime()) &&
+      Number.isFinite(new Date(selectedCheckOutIso).getTime()) &&
+      new Date(selectedCheckOutIso) > new Date(selectedCheckInIso);
+    const unavailableStayTypes =
+      bookingUnit === "hourly"
+        ? (["day_use", "split_rest"] as const)
+        : bookingUnit === "nightly"
+        ? (["nightly", "crashpad"] as const)
+        : (["nightly", "crashpad", "day_use", "split_rest"] as const);
 
     const fetchListings = async () => {
       try {
@@ -667,6 +709,48 @@ export default function SearchPage() {
           });
         }
 
+        // Never show listings that are unavailable for the selected stay window.
+        if (hasValidSelectedWindow && filtered.length > 0) {
+          const listingIds = filtered.map((listing) => listing.id).filter(Boolean);
+          const [{ data: conflictingBookings, error: bookingError }, { data: conflictingBlocks, error: blockError }] =
+            await Promise.all([
+              supabase
+                .from("bookings")
+                .select("listing_id")
+                .in("listing_id", listingIds)
+                .lt("check_in_time", selectedCheckOutIso)
+                .gt("check_out_time", selectedCheckInIso)
+                .in("status", ["pending", "awaiting_payment", "approved", "confirmed", "paid"])
+                .in("stay_type", unavailableStayTypes as unknown as string[]),
+              supabase
+                .from("listing_calendar_blocks")
+                .select("listing_id")
+                .in("listing_id", listingIds)
+                .lt("start_date", selectedCheckOutDate)
+                .gt("end_date", selectedCheckInDate),
+            ]);
+
+          if (bookingError || blockError) {
+            if (__DEV__) {
+              console.error("[search] availability filtering failed", {
+                bookingError,
+                blockError,
+              });
+            }
+            setListings([]);
+            return;
+          }
+
+          const unavailableListingIds = new Set<string>();
+          (conflictingBookings ?? []).forEach((row: any) => {
+            if (row?.listing_id) unavailableListingIds.add(String(row.listing_id));
+          });
+          (conflictingBlocks ?? []).forEach((row: any) => {
+            if (row?.listing_id) unavailableListingIds.add(String(row.listing_id));
+          });
+          filtered = filtered.filter((listing) => !unavailableListingIds.has(listing.id));
+        }
+
         // Apply commute filter on computed values too (covers null DB values)
         if (!Number.isNaN(commuteMax)) {
           filtered = filtered.filter(
@@ -701,7 +785,7 @@ export default function SearchPage() {
     };
 
     fetchListings();
-  }, [q, boundsFilter]);
+  }, [q, boundsFilter, airportCode]);
 
   // Map center (unchanged)
   const center = useMemo(() => {
@@ -895,7 +979,7 @@ export default function SearchPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <header className="sticky top-20 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="w-full px-6 py-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="w-full max-w-[820px]">

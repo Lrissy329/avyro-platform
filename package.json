@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@daypilot/daypilot-lite-react": "^5.4.1",
     "@fontsource/poppins": "^5.2.6",
     "@heroicons/react": "^2.1.5",
     "@phosphor-icons/react": "^2.1.10",

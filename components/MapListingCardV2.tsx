@@ -5,7 +5,7 @@ import Image from "next/image";
 import type { LinkProps } from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewLabel } from "@/lib/reviews";
-import { computeAllInPricing, computeGuestTotalMajorFromHostNet } from "@/lib/pricing";
+import { computeGuestStayPricing } from "@/lib/pricing";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 
@@ -67,12 +67,15 @@ const toPublicUrl = (pathOrUrl?: string | null): string | null => {
   return data?.publicUrl ?? null;
 };
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat("en-GB", {
+const formatCurrency = (value: number) => {
+  const isWhole = Math.round(value * 100) % 100 === 0;
+  return new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: "GBP",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: isWhole ? 0 : 2,
+    maximumFractionDigits: isWhole ? 0 : 2,
   }).format(value);
+};
 
 const normaliseType = (value?: string) => {
   if (!value) return null;
@@ -220,22 +223,19 @@ export default function MapListingCardV2({
     bookingUnit === "hourly"
       ? toNumber(listing.pricePerHour) ?? toNumber(listing.price)
       : toNumber(listing.pricePerNight) ?? toNumber(listing.price);
-  const guestUnitPrice =
+  const stayUnits = staySummary?.units ?? 0;
+  const resolvedUnits = stayUnits > 0 ? stayUnits : 1;
+  const stayPricing =
     hostBasePrice != null
-      ? computeGuestTotalMajorFromHostNet(hostBasePrice, {
-          nights: 1,
+      ? computeGuestStayPricing({
+          hostNetUnitMajor: hostBasePrice,
+          units: resolvedUnits,
+          bookingUnit,
           isFirstCompletedBooking: false,
         })
       : null;
-  const stayUnits = staySummary?.units ?? 0;
-  const stayTotal =
-    hostBasePrice != null && stayUnits > 0
-      ? computeAllInPricing({
-          hostNetTotalPence: Math.round(hostBasePrice * stayUnits * 100),
-          nights: bookingUnit === "hourly" ? 1 : stayUnits,
-          isFirstCompletedBooking: false,
-        }).guest_total_pence / 100
-      : null;
+  const guestUnitPrice = stayPricing?.guest_unit_avg_major ?? null;
+  const stayTotal = stayUnits > 0 ? stayPricing?.guest_total_major ?? null : null;
   const showStayTotal = stayTotal != null;
 
   const tag = buildTag(listing);
@@ -262,7 +262,7 @@ export default function MapListingCardV2({
   const showStayTotalDetails = showStayTotal && stayTotal != null;
   const unitLine =
     guestUnitPrice != null
-      ? `${formatCurrency(guestUnitPrice)} per ${unitLabel}`
+      ? `${formatCurrency(guestUnitPrice)} avg per ${unitLabel}`
       : null;
   const href = listingHref ?? (listing.id ? `/listing/${listing.id}` : "#");
 

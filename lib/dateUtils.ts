@@ -125,6 +125,6 @@ export const formatCurrency = (value?: number | null, currency?: string | null):
 };
 
 export const formatRangeSummary = (start: Date, end: Date): string => {
-  const formatter = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+  const formatter = new Intl.DateTimeFormat("en-GB", { month: "short", day: "numeric" });
   return `${formatter.format(start)} – ${formatter.format(end)}`;
 };

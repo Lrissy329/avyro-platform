@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { stripe } from "@/lib/stripe";
 import { createClient } from "@supabase/supabase-js";
+import { finalizeSharedGroupCheckout, isSharedGroupCheckoutSession } from "@/lib/sharedCheckout";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -38,6 +39,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const metadata = session.metadata ?? {};
+    if (isSharedGroupCheckoutSession(session as any)) {
+      const sharedResult = await finalizeSharedGroupCheckout({
+        supabaseAdmin,
+        session: session as any,
+      });
+      if (sharedResult.error) {
+        return res.status(500).json({ error: sharedResult.error });
+      }
+      return res.status(200).json({ success: true, bookingId: sharedResult.bookingId });
+    }
+
     const bookingId = (metadata.booking_id ?? metadata.bookingId ?? null) as string | null;
     const listingId = (metadata.listingId ?? null) as string | null;
     const hostId = (metadata.hostId ?? null) as string | null;

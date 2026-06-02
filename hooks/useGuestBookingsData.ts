@@ -24,12 +24,21 @@ type UseGuestBookingsDataResult = {
 };
 
 const bookingSelects = [
-  "id, listing_id, host_id, status, check_in_time, check_out_time, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, created_at",
-  "id, listing_id, host_id, status, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, created_at",
-  "id, listing_id, host_id, status, check_in, check_out, guests_total, price_total, currency, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in_time, check_out_time, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, flex_mode, flex_status, flex_min_nights, flex_max_nights, flex_current_confirmed_end, flex_max_end, flex_rolling_window_days, flex_pricing_multiplier, flex_extension_cutoff_at, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence, flex_extra_night_cutoff_at, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in_time, check_out_time, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, flex_mode, flex_status, flex_min_nights, flex_max_nights, flex_current_confirmed_end, flex_max_end, flex_rolling_window_days, flex_pricing_multiplier, flex_extension_cutoff_at, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in_time, check_out_time, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, flex_mode, flex_status, flex_current_confirmed_end, flex_max_end, flex_rolling_window_days, flex_pricing_multiplier, flex_extension_cutoff_at, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence, flex_extra_night_cutoff_at, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in_time, check_out_time, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, flex_mode, flex_status, flex_current_confirmed_end, flex_max_end, flex_extension_cutoff_at, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in_time, check_out_time, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in_time, check_out_time, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, flex_extra_night, flex_extra_night_status, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in, check_out, guests_total, guest_total_pence, price_total, currency, stripe_status, created_at",
+  "id, listing_id, host_id, status, booking_type, shared_group_id, check_in, check_out, guests_total, price_total, currency, created_at",
 ] as const;
 
 const listingSelects = [
+  "id, title, location, is_shared_stay, shared_total_spots, shared_weekly_price_pence, address, check_in_instructions, check_out_instructions, house_rules",
+  "id, title, location, is_shared_stay, shared_total_spots, shared_weekly_price_pence, address, check_in_instructions, check_out_instructions",
+  "id, title, location, is_shared_stay, shared_total_spots, shared_weekly_price_pence, address",
+  "id, title, location, is_shared_stay, shared_total_spots, shared_weekly_price_pence",
   "id, title, location, address, check_in_instructions, check_out_instructions, house_rules",
   "id, title, location, address, check_in_instructions, check_out_instructions",
   "id, title, location, address",

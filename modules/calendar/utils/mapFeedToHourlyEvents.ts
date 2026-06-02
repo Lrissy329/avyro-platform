@@ -62,6 +62,13 @@ export function mapFeedToHourlyEvents(feed: CalendarFeed): EventMapResult {
         currency: booking.currency,
         address: listingById[booking.listingId]?.address,
         bookingType: "hourly",
+        flexMode: booking.flexMode ?? null,
+        flexCurrentConfirmedEnd: booking.flexCurrentConfirmedEnd ?? null,
+        flexMaxEnd: booking.flexMaxEnd ?? null,
+        flexExtensionCutoffAt: booking.flexExtensionCutoffAt ?? null,
+        flexExtraNight: booking.flexExtraNight ?? null,
+        flexExtraNightStatus: booking.flexExtraNightStatus ?? null,
+        flexExtraNightPricePence: booking.flexExtraNightPricePence ?? null,
         isBlock: false,
       };
 

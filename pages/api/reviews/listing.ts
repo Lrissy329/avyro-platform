@@ -204,6 +204,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   } catch (error: any) {
     if (error instanceof ReviewRequestError) {
+      if (error.code === "REVIEWS_TABLE_MISSING") {
+        return res.status(200).json({
+          listingId,
+          summary: emptySummary(),
+          reviews: [],
+        });
+      }
       return res.status(error.status).json({
         error: error.message,
         code: error.code ?? null,
@@ -213,4 +220,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: "Unable to load listing reviews." });
   }
 }
-

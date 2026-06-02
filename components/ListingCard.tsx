@@ -5,7 +5,8 @@ import Image from "next/image";
 import { Listing } from "@/types/Listing";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewSummaryLineFromScore } from "@/lib/reviews";
-import { computeGuestStayPricing } from "@/lib/pricing";
+import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
+import { SharedStayBadge } from "@/components/shared-stay/SharedStayBadge";
 
 const BUCKET = "listing-photos";
 const toPublicUrl = (pathOrUrl?: string | null): string | null => {
@@ -36,6 +37,10 @@ type ListingLike = Partial<Listing> & {
   review_total?: number | null;
   reviewOverall?: number | null;
   reviewTotal?: number | null;
+  isSharedStay?: boolean | null;
+  sharedTotalSpots?: number | null;
+  sharedWeeklyPricePence?: number | null;
+  sharedSpotsRemaining?: number | null;
 };
 
 interface Props {
@@ -110,8 +115,31 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
     (listing.booking_unit ?? listing.bookingUnit ?? (listing as any).booking_unit) === "hourly"
       ? "hourly"
       : "nightly";
+  const isSharedStay = Boolean((listing as any).isSharedStay ?? (listing as any).is_shared_stay);
+  const sharedTotalSpots =
+    toNumber((listing as any).sharedTotalSpots) ??
+    toNumber((listing as any).shared_total_spots) ??
+    null;
+  const sharedSpotDivisor = Math.max(1, Math.round(Number(sharedTotalSpots ?? 1)) || 1);
+  const sharedWeeklyPriceMajorRaw =
+    toNumber((listing as any).sharedWeeklyPricePence) ??
+    toNumber((listing as any).shared_weekly_price_pence);
+  const sharedWeeklyPriceMajor =
+    sharedWeeklyPriceMajorRaw != null
+      ? computeSharedPerPersonWeeklyPricePence({
+          totalWeeklyPricePence: sharedWeeklyPriceMajorRaw,
+          totalSpots: sharedSpotDivisor,
+        }).rounded_per_person_weekly_pence / 100
+      : null;
+  const sharedSpotsRemaining =
+    toNumber((listing as any).sharedSpotsRemaining) ??
+    toNumber((listing as any).shared_spots_remaining) ??
+    toNumber((listing as any).sharedSpotsLeft) ??
+    null;
   const hostBasePrice =
-    bookingUnit === "hourly"
+    isSharedStay
+      ? sharedWeeklyPriceMajor
+      : bookingUnit === "hourly"
       ? toNumber((listing as any).price_per_hour) ??
         toNumber(listing.pricePerHour) ??
         toNumber((listing as any).price_per_night) ??
@@ -126,8 +154,8 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
     listing.roomType ??
     (listing as any).type;
   const imageSrc = pickImage(listing);
-  const unitLabel = bookingUnit === "hourly" ? "hour" : "night";
-  const modeLabel = bookingUnit === "hourly" ? "Day-use" : "Overnight";
+  const unitLabel = isSharedStay ? "week" : bookingUnit === "hourly" ? "hour" : "night";
+  const modeLabel = isSharedStay ? "Shared stay" : bookingUnit === "hourly" ? "Day-use" : "Overnight";
   const isEntirePlace =
     typeValue && normaliseType(typeValue).toLowerCase().includes("entire");
   const metaLine = [locationLabel, isEntirePlace ? "Entire place" : null]
@@ -163,6 +191,7 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
   return (
     <Link
       href={listingId ? `/listing/${listingId}` : "#"}
+      prefetch={false}
       className="block no-underline hover:no-underline"
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
@@ -197,6 +226,13 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
               {metaLine ? (
                 <p className="line-clamp-1 text-sm text-[#4B5563]">{metaLine}</p>
               ) : null}
+              <SharedStayBadge
+                isSharedStay={isSharedStay}
+                perPersonWeeklyPrice={sharedWeeklyPriceMajor}
+                spotsRemaining={sharedSpotsRemaining}
+                totalSpots={sharedTotalSpots}
+                className="pt-1"
+              />
             </div>
             <div className="flex min-w-[140px] flex-col items-end justify-between text-right">
               <div className="mt-auto">
@@ -206,18 +242,35 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
                       {formatCurrency(stayTotal)}
                     </div>
                     <div className="text-xs text-[#4B5563]">
-                      {stayUnits} {stayUnits === 1 ? unitLabel : `${unitLabel}s`},{" "}
-                      {guestUnitPrice != null
-                        ? `avg ${formatCurrency(guestUnitPrice)} / ${unitLabel}`
-                        : "All fees included"}
+                      {isSharedStay
+                        ? `${stayUnits} nights, ${guestUnitPrice != null ? `${formatCurrency(guestUnitPrice)} / person / week` : "Shared rate"}`
+                        : `${stayUnits} ${stayUnits === 1 ? unitLabel : `${unitLabel}s`}, ${
+                            guestUnitPrice != null
+                              ? `avg ${formatCurrency(guestUnitPrice)} / ${unitLabel}`
+                              : "All fees included"
+                          }`}
                     </div>
                   </>
                 ) : guestUnitPrice != null ? (
                   <>
                     <div className="text-lg font-semibold text-neutral-900 font-mono tabular-nums">
-                      {formatCurrency(guestUnitPrice)} / {unitLabel}
+                      {isSharedStay
+                        ? `${formatCurrency(guestUnitPrice)} / person / week`
+                        : `${formatCurrency(guestUnitPrice)} / ${unitLabel}`}
                     </div>
-                    <div className="text-xs text-[#4B5563]">All fees included</div>
+                    <div className="text-xs text-[#4B5563]">
+                      {isSharedStay
+                        ? (() => {
+                            const remaining =
+                              toNumber((listing as any).sharedSpotsRemaining) ??
+                              toNumber((listing as any).shared_spots_remaining) ??
+                              null;
+                            if (remaining == null) return "Shared stay";
+                            if (remaining <= 0) return "Full";
+                            return `${remaining} spot${remaining === 1 ? "" : "s"} left`;
+                          })()
+                        : "All fees included"}
+                    </div>
                   </>
                 ) : null}
               </div>

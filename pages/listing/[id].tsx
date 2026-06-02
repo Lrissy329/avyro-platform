@@ -44,6 +44,20 @@ type DbListing = {
   primary_poi_id?: string | null;
   amenities?: string[] | null;
   user_id?: string | null;
+  allow_flexible_stays?: boolean | null;
+  flexible_stay_mode?: "none" | "extra_night" | "rolling" | string | null;
+  flex_min_commitment_nights?: number | null;
+  flex_max_extension_nights?: number | null;
+  flex_extension_notice_hours?: number | null;
+  flex_extension_pricing_mode?: "same_rate" | "premium_10" | string | null;
+  flex_rolling_window_days?: number | null;
+  flex_pricing_multiplier?: number | null;
+  is_shared_stay?: boolean | null;
+  shared_total_spots?: number | null;
+  shared_weekly_price_pence?: number | null;
+  shared_join_mode?: "open" | "approval" | string | null;
+  shared_min_weeks?: number | null;
+  shared_max_weeks?: number | null;
 };
 type TransportSummary = {
   public_transport_duration_minutes: number | null;
@@ -230,6 +244,7 @@ const formatShortRange = (date?: Date | null) => {
   if (!date) return "";
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 };
+
 export default function ListingDetail() {
   const router = useRouter();
   const { id } = router.query;
@@ -265,6 +280,12 @@ export default function ListingDetail() {
     : "This stay is optimized for crew schedules.";
   const isHourlyListing = listing?.booking_unit === "hourly";
   const bookingUnit: "nightly" | "hourly" = isHourlyListing ? "hourly" : "nightly";
+  const listingFlexibleMode: "none" | "extra_night" | "rolling" =
+    listing?.flexible_stay_mode === "rolling"
+      ? "rolling"
+      : listing?.flexible_stay_mode === "extra_night"
+      ? "extra_night"
+      : "none";
   const bookingUnitLabel = BOOKING_UNIT_LABELS[bookingUnit];
   const bookingUnitDetail = BOOKING_UNIT_DETAILS[bookingUnit];
   const transitLine = useMemo(() => {
@@ -300,19 +321,15 @@ export default function ListingDetail() {
     if (!id || typeof id !== "string") return;
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("listings")
-        .select(
-          "id, title, description, location, airport_code, primary_poi_id, price_per_night, price_per_hour, price_per_week, price_per_month, price_overrides, bathrooms, beds, type, rental_type, booking_unit, photos, amenities, user_id, latitude, longitude"
-        )
-        .eq("id", id)
-        .single();
-      if (error || !data) {
-        console.error("Error fetching listing:", error?.message);
+      const listingResponse = await fetch(`/api/listings/${id}`);
+      const listingPayload = await listingResponse.json().catch(() => null);
+      if (!listingResponse.ok || !listingPayload) {
+        console.error("Error fetching listing:", listingPayload?.error ?? "Request failed");
         setListing(null);
         setLoading(false);
         return;
       }
+      const data = listingPayload as DbListing;
       let rawPhotos: unknown = data.photos;
       if (typeof rawPhotos === "string") {
         try {
@@ -329,7 +346,24 @@ export default function ListingDetail() {
             .map((entry: unknown) => normalizePhotoEntry(entry))
             .filter(Boolean) as string[])
         : [];
-      setListing(data as DbListing);
+      const mappedListing: DbListing = {
+        ...(data as DbListing),
+        allow_flexible_stays: data.allow_flexible_stays ?? false,
+        flexible_stay_mode: data.flexible_stay_mode ?? "none",
+        flex_min_commitment_nights: data.flex_min_commitment_nights ?? 7,
+        flex_max_extension_nights: data.flex_max_extension_nights ?? 7,
+        flex_extension_notice_hours: data.flex_extension_notice_hours ?? 24,
+        flex_extension_pricing_mode: data.flex_extension_pricing_mode ?? "same_rate",
+        flex_rolling_window_days: data.flex_rolling_window_days ?? 3,
+        flex_pricing_multiplier: data.flex_pricing_multiplier ?? 1.1,
+        is_shared_stay: data.is_shared_stay ?? false,
+        shared_total_spots: data.shared_total_spots ?? 0,
+        shared_weekly_price_pence: data.shared_weekly_price_pence ?? null,
+        shared_join_mode: data.shared_join_mode ?? "open",
+        shared_min_weeks: data.shared_min_weeks ?? 1,
+        shared_max_weeks: data.shared_max_weeks ?? 12,
+      };
+      setListing(mappedListing);
       setPhotoUrls(normalizedPhotos);
       if (data.primary_poi_id) {
         const { data: transportRow } = await supabase
@@ -783,8 +817,27 @@ export default function ListingDetail() {
           <aside className="self-start lg:sticky lg:top-24">
             <BookingWidget
               listingId={listing.id}
+              listingTitle={listing.title}
               basePrice={baseRate}
               hostId={listing.user_id ?? ""}
+              isSharedStay={Boolean(listing.is_shared_stay)}
+              sharedTotalSpots={listing.shared_total_spots ?? 0}
+              sharedWeeklyPricePence={listing.shared_weekly_price_pence ?? null}
+              sharedJoinMode={listing.shared_join_mode ?? "open"}
+              sharedMinWeeks={listing.shared_min_weeks ?? 1}
+              sharedMaxWeeks={listing.shared_max_weeks ?? 12}
+              allowFlexibleStays={listing.allow_flexible_stays ?? false}
+              flexibleStayMode={listingFlexibleMode}
+              flexMinCommitmentNights={listing.flex_min_commitment_nights ?? 7}
+              flexMaxExtensionNights={listing.flex_max_extension_nights ?? 7}
+              flexExtensionNoticeHours={listing.flex_extension_notice_hours ?? 24}
+              flexExtensionPricingMode={
+                listing.flex_extension_pricing_mode === "premium_10"
+                  ? "premium_10"
+                  : "same_rate"
+              }
+              flexRollingWindowDays={listing.flex_rolling_window_days ?? 3}
+              flexPricingMultiplier={listing.flex_pricing_multiplier ?? 1.1}
               bookingUnit={listing.booking_unit === "hourly" ? "hourly" : "nightly"}
               rentalType={listing.rental_type}
               nightlyRange={nightlyRange}
@@ -964,7 +1017,7 @@ export default function ListingDetail() {
         </section>
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
           <button className="underline-offset-4 hover:underline">Report this listing</button>
-          <p>&copy; {new Date().getFullYear()} Aeronooc — inspired by Airbnb excellence</p>
+          <p>&copy; {new Date().getFullYear()} Veloro — inspired by Airbnb excellence</p>
         </footer>
       </div>
     </main>

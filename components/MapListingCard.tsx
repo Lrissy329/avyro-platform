@@ -4,7 +4,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewSummaryLineFromScore } from "@/lib/reviews";
-import { computeGuestStayPricing } from "@/lib/pricing";
+import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
+import { SharedStayBadge } from "@/components/shared-stay/SharedStayBadge";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 
@@ -43,6 +44,10 @@ type MapListing = {
   review_total?: number | null;
   reviewOverall?: number | null;
   reviewTotal?: number | null;
+  isSharedStay?: boolean | null;
+  sharedTotalSpots?: number | null;
+  sharedWeeklyPricePence?: number | null;
+  sharedSpotsRemaining?: number | null;
 };
 
 type MapListingCardProps = {
@@ -178,16 +183,32 @@ export default function MapListingCard({
 }: MapListingCardProps) {
   const bookingUnit =
     listing.booking_unit === "hourly" ? "hourly" : "nightly";
-  const unitLabel = bookingUnit === "hourly" ? "hour" : "night";
+  const isSharedStay = Boolean(listing.isSharedStay ?? (listing as any).is_shared_stay);
+  const unitLabel = isSharedStay ? "week" : bookingUnit === "hourly" ? "hour" : "night";
+  const sharedTotalSpotsValue =
+    toNumber(listing.sharedTotalSpots) ?? toNumber((listing as any).shared_total_spots) ?? 1;
+  const sharedSpotDivisor = Math.max(1, Math.round(Number(sharedTotalSpotsValue)) || 1);
+  const sharedWeeklyPricePenceValue =
+    toNumber(listing.sharedWeeklyPricePence) ??
+    toNumber((listing as any).shared_weekly_price_pence);
+  const sharedWeeklyPriceMajor =
+    sharedWeeklyPricePenceValue != null
+      ? computeSharedPerPersonWeeklyPricePence({
+          totalWeeklyPricePence: Number(sharedWeeklyPricePenceValue),
+          totalSpots: sharedSpotDivisor,
+        }).rounded_per_person_weekly_pence / 100
+      : null;
   const hostBasePrice =
-    bookingUnit === "hourly"
+    isSharedStay
+      ? sharedWeeklyPriceMajor
+      : bookingUnit === "hourly"
       ? toNumber(listing.pricePerHour) ?? toNumber(listing.price)
       : toNumber(listing.pricePerNight) ?? toNumber(listing.price);
 
   const stayUnits = staySummary?.units ?? 0;
   const resolvedUnits = stayUnits > 0 ? stayUnits : 1;
   const stayPricing =
-    hostBasePrice != null
+    hostBasePrice != null && !isSharedStay
       ? computeGuestStayPricing({
           hostNetUnitMajor: hostBasePrice,
           units: resolvedUnits,
@@ -195,7 +216,7 @@ export default function MapListingCard({
           isFirstCompletedBooking: false,
         })
       : null;
-  const guestUnitPrice = stayPricing?.guest_unit_avg_major ?? null;
+  const guestUnitPrice = isSharedStay ? sharedWeeklyPriceMajor : stayPricing?.guest_unit_avg_major ?? null;
 
   const travelBadge = buildTravelBadge(listing);
   const titleLine = buildTitle(listing);
@@ -247,6 +268,7 @@ export default function MapListingCard({
   return (
     <Link
       href={listingId ? `/listing/${listingId}` : "#"}
+      prefetch={false}
       className="no-underline hover:no-underline"
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
@@ -290,6 +312,13 @@ export default function MapListingCard({
               {titleLine}
             </h3>
             <p className="mt-1 text-sm text-[#4B5563]">{subline}</p>
+            <SharedStayBadge
+              isSharedStay={isSharedStay}
+              perPersonWeeklyPrice={sharedWeeklyPriceMajor}
+              spotsRemaining={listing.sharedSpotsRemaining ?? null}
+              totalSpots={listing.sharedTotalSpots ?? null}
+              className="mt-2"
+            />
             {reviewLine ? (
               <p className="mt-1 text-xs text-[#4B5563] font-mono tabular-nums">
                 {reviewLine}

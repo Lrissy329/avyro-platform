@@ -19,6 +19,13 @@ export type CalendarFeedBooking = {
   payoutEstimatePence?: number;
   bookingType?: "nightly" | "hourly";
   currency?: string;
+  flexMode?: "none" | "extra_night" | "rolling" | null;
+  flexCurrentConfirmedEnd?: string | null;
+  flexMaxEnd?: string | null;
+  flexExtensionCutoffAt?: string | null;
+  flexExtraNight?: boolean;
+  flexExtraNightStatus?: "reserved" | "used" | "released" | "expired" | null;
+  flexExtraNightPricePence?: number | null;
 };
 
 export type CalendarFeedBlock = {
@@ -27,7 +34,15 @@ export type CalendarFeedBlock = {
   start: string;
   end: string;
   reason?: string;
-  blockType?: "nightly" | "hourly";
+  blockType?: "nightly" | "hourly" | "flex_optional" | "flex_rolling_held" | "shared_group";
+  bookingId?: string;
+  cutoffAt?: string | null;
+  maxEnd?: string | null;
+  confirmedEnd?: string | null;
+  sharedGroupId?: string;
+  sharedTotalSpots?: number;
+  sharedFilledSpots?: number;
+  sharedPendingSpots?: number;
 };
 
 export type CalendarFeed = {
@@ -58,6 +73,17 @@ export type ReservationRecord = {
   address?: string;
   bookingType?: "nightly" | "hourly";
   isBlock?: boolean;
+  flexMode?: "none" | "extra_night" | "rolling" | null;
+  flexCurrentConfirmedEnd?: string | null;
+  flexMaxEnd?: string | null;
+  flexExtensionCutoffAt?: string | null;
+  flexExtraNight?: boolean;
+  flexExtraNightStatus?: "reserved" | "used" | "released" | "expired" | null;
+  flexExtraNightPricePence?: number | null;
+  sharedGroupId?: string | null;
+  sharedTotalSpots?: number | null;
+  sharedFilledSpots?: number | null;
+  sharedPendingSpots?: number | null;
 };
 
 export type EventMapResult = {

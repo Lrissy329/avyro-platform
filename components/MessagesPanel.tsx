@@ -92,6 +92,21 @@ const isMissingColumn = (error: any) => {
   return code === "42703" || code === "PGRST204" || message.includes("schema cache");
 };
 
+const isMissingRelation = (error: any) => {
+  const code = String(error?.code ?? "").toLowerCase();
+  const message = String(error?.message ?? "").toLowerCase();
+  return code === "42p01" || message.includes("relation") || message.includes("does not exist");
+};
+
+const isMissingMessageReads = (error: any) => {
+  const message = String(error?.message ?? "").toLowerCase();
+  return (
+    isMissingRelation(error) ||
+    isMissingColumn(error) ||
+    message.includes("message_reads")
+  );
+};
+
 export function MessagesPanel({ role }: MessagesPanelProps) {
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -105,6 +120,7 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
   const [partnerProfiles, setPartnerProfiles] = useState<Record<string, PartnerProfile>>({});
   const [lastMessages, setLastMessages] = useState<Record<string, Message>>({});
   const [readMap, setReadMap] = useState<Record<string, number>>({});
+  const [messageReadsAvailable, setMessageReadsAvailable] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<"active" | "archived">("active");
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -126,9 +142,9 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
 
   const markConversationRead = useCallback(
     async (conversationId: string | null) => {
-      if (!conversationId || !userId) return;
+      if (!conversationId || !userId || !messageReadsAvailable) return;
       try {
-        await supabase.from("message_reads").upsert(
+        const { error } = await supabase.from("message_reads").upsert(
           {
             conversation_id: conversationId,
             user_id: userId,
@@ -136,12 +152,21 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
           },
           { onConflict: "conversation_id,user_id" }
         );
+        if (error) {
+          if (isMissingMessageReads(error)) {
+            setMessageReadsAvailable(false);
+            return;
+          }
+          return;
+        }
         setReadMap((prev) => ({ ...prev, [conversationId]: Date.now() }));
       } catch (err) {
-        console.warn("[messages] message_reads not available", err);
+        if (isMissingMessageReads(err)) {
+          setMessageReadsAvailable(false);
+        }
       }
     },
-    [userId]
+    [messageReadsAvailable, userId]
   );
 
   useEffect(() => {
@@ -288,13 +313,20 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
   }, []);
 
   const loadReads = useCallback(async () => {
-    if (!userId) return;
+    if (!userId || !messageReadsAvailable) return;
     try {
       const { data, error } = await supabase
         .from("message_reads")
         .select("conversation_id, last_read_at")
         .eq("user_id", userId);
-      if (error || !data) return;
+      if (error) {
+        if (isMissingMessageReads(error)) {
+          setMessageReadsAvailable(false);
+          return;
+        }
+        return;
+      }
+      if (!data) return;
       const next = (data as { conversation_id: string; last_read_at: string | null }[]).reduce<
         Record<string, number>
       >((acc, row) => {
@@ -305,9 +337,11 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
       }, {});
       setReadMap(next);
     } catch (err) {
-      console.warn("[messages] message_reads not available", err);
+      if (isMissingMessageReads(err)) {
+        setMessageReadsAvailable(false);
+      }
     }
-  }, [userId]);
+  }, [messageReadsAvailable, userId]);
 
   const loadConversations = useCallback(async (showLoading = false) => {
     if (!userId) return;
@@ -376,18 +410,22 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
           if (newRow.host_id !== userId && newRow.guest_id !== userId) return;
           loadConversations(false);
         }
-      )
-      .on(
+      );
+
+    if (messageReadsAvailable) {
+      channel.on(
         "postgres_changes",
         { event: "*", schema: "public", table: "message_reads", filter: `user_id=eq.${userId}` },
         () => loadReads()
-      )
-      .subscribe();
+      );
+    }
+
+    channel.subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userId, loadConversations, loadReads]);
+  }, [userId, loadConversations, loadReads, messageReadsAvailable]);
 
   const loadMessagesForConversation = useCallback(async (conversationId: string) => {
     let messagesRows: Message[] = [];

@@ -8,6 +8,14 @@ import {
   ReviewRequestError,
 } from "@/lib/reviewSystem";
 
+const EMPTY_ELIGIBILITY = {
+  canGuestReview: false,
+  canHostReview: false,
+  guestAlreadyReviewed: false,
+  hostAlreadyReviewed: false,
+  reviewWindowExpiresAt: null,
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     res.setHeader("Allow", "GET");
@@ -37,6 +45,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json(eligibility);
   } catch (error: any) {
     if (error instanceof ReviewRequestError) {
+      if (error.code === "REVIEWS_TABLE_MISSING") {
+        return res.status(200).json(EMPTY_ELIGIBILITY);
+      }
       return res.status(error.status).json({
         error: error.message,
         code: error.code ?? null,
@@ -46,4 +57,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: "Unable to determine review eligibility." });
   }
 }
-

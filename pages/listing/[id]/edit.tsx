@@ -37,6 +37,17 @@ type ListingForm = {
   has_coffee_maker: boolean;
   has_closet: boolean;
   photos: string[];
+  allow_flexible_stays: boolean;
+  flexible_stay_mode: "none" | "extra_night";
+  flex_min_commitment_nights: number;
+  flex_max_extension_nights: number;
+  flex_rolling_window_days: number;
+  flex_pricing_multiplier: number;
+  is_shared_stay: boolean;
+  shared_total_spots: number;
+  shared_weekly_price_gbp: number;
+  shared_min_weeks: number;
+  shared_max_weeks: number;
 };
 
 const RENTAL_TYPE_LABELS: Record<string, string> = {
@@ -59,6 +70,36 @@ const BOOKING_UNIT_COPY: Record<"nightly" | "hourly", string> = {
 const RENTAL_TYPE_AMENITY_LOCKS: Record<string, Array<keyof ListingForm>> = {
   day_use: ["has_kitchen"],
   split_rest: ["has_kitchen"],
+};
+const NUMERIC_FORM_FIELDS = new Set([
+  "price_per_night",
+  "price_per_hour",
+  "price_per_week",
+  "price_per_month",
+  "bathrooms",
+  "flex_min_commitment_nights",
+  "flex_max_extension_nights",
+  "flex_rolling_window_days",
+  "flex_pricing_multiplier",
+  "shared_total_spots",
+  "shared_weekly_price_gbp",
+  "shared_min_weeks",
+  "shared_max_weeks",
+]);
+
+const isMissingAllowFlexibleStaysColumn = (error: any) => {
+  const message = String(error?.message ?? "").toLowerCase();
+  const code = error?.code;
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    ((message.includes("allow_flexible_stays") ||
+      message.includes("flexible_stay_mode") ||
+      message.includes("flex_") ||
+      message.includes("is_shared_stay") ||
+      message.includes("shared_")) &&
+      (message.includes("does not exist") || message.includes("schema cache")))
+  );
 };
 
 export default function EditListingPage() {
@@ -153,6 +194,17 @@ export default function EditListingPage() {
           Array.isArray(data.photos)
             ? (data.photos.filter((p: any) => typeof p === "string") as string[])
             : [],
+        allow_flexible_stays: data.allow_flexible_stays ?? false,
+        flexible_stay_mode: data.allow_flexible_stays === false ? "none" : "extra_night",
+        flex_min_commitment_nights: Number(data.flex_min_commitment_nights ?? 7),
+        flex_max_extension_nights: Number(data.flex_max_extension_nights ?? 14),
+        flex_rolling_window_days: Number(data.flex_rolling_window_days ?? 3),
+        flex_pricing_multiplier: Number(data.flex_pricing_multiplier ?? 1.1),
+        is_shared_stay: Boolean(data.is_shared_stay),
+        shared_total_spots: Number(data.shared_total_spots ?? 4),
+        shared_weekly_price_gbp: Number(data.shared_weekly_price_pence ?? 0) / 100,
+        shared_min_weeks: Number(data.shared_min_weeks ?? 1),
+        shared_max_weeks: Number(data.shared_max_weeks ?? 12),
       };
 
       setForm(initial);
@@ -167,9 +219,17 @@ export default function EditListingPage() {
   ) => {
     const { name, value, type, checked } = e.target as any;
     if (!form) return;
+    const nextValue =
+      type === "checkbox"
+        ? checked
+        : NUMERIC_FORM_FIELDS.has(name)
+        ? value === ""
+          ? 0
+          : Number(value)
+        : value;
     setForm({
       ...form,
-      [name]: type === "checkbox" ? checked : value,
+      [name]: nextValue,
     });
   };
 
@@ -260,6 +320,18 @@ export default function EditListingPage() {
     if (!form || !id) return;
     setSaving(true);
     setFormError(null);
+    if (form.is_shared_stay) {
+      if (!Number.isFinite(Number(form.shared_weekly_price_gbp)) || Number(form.shared_weekly_price_gbp) <= 0) {
+        setSaving(false);
+        setFormError("Total shared weekly price must be greater than zero.");
+        return;
+      }
+      if (Number(form.shared_total_spots) < 1) {
+        setSaving(false);
+        setFormError("Shared stay listings need at least one spot.");
+        return;
+      }
+    }
     const bookingUnit = form.booking_unit === "hourly" ? "hourly" : "nightly";
 
     const parseMoney = (value: number | string) => {
@@ -342,6 +414,37 @@ export default function EditListingPage() {
       has_coffee_maker: form.has_coffee_maker,
       has_closet: form.has_closet,
       photos: finalPhotos,
+      allow_flexible_stays: form.allow_flexible_stays,
+      flexible_stay_mode: form.allow_flexible_stays ? "extra_night" : "none",
+      flex_min_commitment_nights: form.allow_flexible_stays
+        ? Math.max(1, Math.round(Number(form.flex_min_commitment_nights) || 1))
+        : null,
+      flex_max_extension_nights: form.allow_flexible_stays
+        ? Math.max(0, Math.round(Number(form.flex_max_extension_nights) || 0))
+        : null,
+      flex_rolling_window_days: form.allow_flexible_stays
+        ? Math.max(1, Math.round(Number(form.flex_rolling_window_days) || 1))
+        : null,
+      flex_pricing_multiplier: form.allow_flexible_stays
+        ? Math.min(5, Math.max(1, Number(form.flex_pricing_multiplier) || 1))
+        : null,
+      is_shared_stay: form.is_shared_stay,
+      shared_total_spots: form.is_shared_stay
+        ? Math.max(1, Math.round(Number(form.shared_total_spots) || 1))
+        : null,
+      shared_weekly_price_pence: form.is_shared_stay
+        ? Math.max(0, Math.round(Number(form.shared_weekly_price_gbp) || 0) * 100)
+        : null,
+      shared_join_mode: form.is_shared_stay ? "open" : null,
+      shared_min_weeks: form.is_shared_stay
+        ? Math.max(1, Math.round(Number(form.shared_min_weeks) || 1))
+        : null,
+      shared_max_weeks: form.is_shared_stay
+        ? Math.max(
+            Math.max(1, Math.round(Number(form.shared_min_weeks) || 1)),
+            Math.round(Number(form.shared_max_weeks) || 1)
+          )
+        : null,
     };
 
     if (bookingUnit === "nightly") {
@@ -351,10 +454,33 @@ export default function EditListingPage() {
       payload.price_overrides = formattedOverrides.length ? formattedOverrides : null;
     }
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from("listings")
       .update(payload)
       .eq("id", id);
+
+    if (error && isMissingAllowFlexibleStaysColumn(error)) {
+      const {
+        allow_flexible_stays,
+        flexible_stay_mode,
+        flex_min_commitment_nights,
+        flex_max_extension_nights,
+        flex_rolling_window_days,
+        flex_pricing_multiplier,
+        is_shared_stay,
+        shared_total_spots,
+        shared_weekly_price_pence,
+        shared_join_mode,
+        shared_min_weeks,
+        shared_max_weeks,
+        ...fallbackPayload
+      } = payload;
+      const retry = await supabase
+        .from("listings")
+        .update(fallbackPayload)
+        .eq("id", id);
+      error = retry.error;
+    }
 
     setSaving(false);
 
@@ -466,6 +592,99 @@ export default function EditListingPage() {
                 booking.
               </p>
             </div>
+            <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <input
+                type="checkbox"
+                name="allow_flexible_stays"
+                checked={form.allow_flexible_stays}
+                onChange={onChange}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-slate-900">Allow flexible stays</span>
+                <span className="mt-1 block text-xs text-slate-600">
+                  Let guests reserve one optional extra night for schedule flexibility.
+                </span>
+              </span>
+            </label>
+            {form.allow_flexible_stays ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-900">Optional extra night enabled</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Guests can reserve one additional night and are only charged if they use it.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <input
+                type="checkbox"
+                name="is_shared_stay"
+                checked={form.is_shared_stay}
+                onChange={onChange}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900"
+              />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-900">Shared stay</span>
+                  <span className="mt-1 block text-xs text-slate-600">
+                    Allow guests to join or start shared weekly groups. Per-person pricing is calculated from total weekly price and spots.
+                  </span>
+                </span>
+              </label>
+            {form.is_shared_stay ? (
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className={labelClass}>Total weekly price (GBP)</label>
+                  <input
+                    name="shared_weekly_price_gbp"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={form.shared_weekly_price_gbp}
+                    onChange={onChange}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Total spots</label>
+                  <input
+                    name="shared_total_spots"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={form.shared_total_spots}
+                    onChange={onChange}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Minimum weeks</label>
+                  <input
+                    name="shared_min_weeks"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={form.shared_min_weeks}
+                    onChange={onChange}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Maximum weeks</label>
+                  <input
+                    name="shared_max_weeks"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={form.shared_max_weeks}
+                    onChange={onChange}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className={sectionClass}>

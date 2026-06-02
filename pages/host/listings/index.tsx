@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
+import { HostSharedListingBadge } from "@/components/shared-stay/HostSharedListingBadge";
 
 type ListingSummary = {
   id: string;
@@ -16,6 +17,9 @@ type ListingSummary = {
   rental_type: string | null;
   price_per_night: number | null;
   price_per_hour: number | null;
+  is_shared_stay?: boolean | null;
+  shared_weekly_price_pence?: number | null;
+  shared_total_spots?: number | null;
   created_at: string | null;
 };
 
@@ -60,7 +64,7 @@ export default function HostListingsPage() {
         const { data, error: fetchError } = await supabase
           .from("listings")
           .select(
-            "id, title, location, booking_unit, rental_type, price_per_night, price_per_hour, created_at"
+            "id, title, location, booking_unit, rental_type, price_per_night, price_per_hour, is_shared_stay, shared_weekly_price_pence, shared_total_spots, created_at"
           )
           .eq("user_id", userId)
           .order("created_at", { ascending: false });
@@ -144,12 +148,29 @@ export default function HostListingsPage() {
                       <p className="text-xs text-slate-500">
                         {listing.location ?? "Location not set"}
                       </p>
+                      <HostSharedListingBadge
+                        isSharedStay={listing.is_shared_stay}
+                        totalSpots={listing.shared_total_spots}
+                        className="mt-1"
+                      />
                     </div>
                     <div className="text-sm text-slate-600">
-                      {unit === "hourly" ? "Hourly" : "Nightly"} · {formatLabel(listing.rental_type)}
+                      {listing.is_shared_stay
+                        ? "Shared stay"
+                        : `${unit === "hourly" ? "Hourly" : "Nightly"} · ${formatLabel(listing.rental_type)}`}
                     </div>
                     <div className="text-sm text-slate-600 font-mono tabular-nums">
-                      {formatPrice(price ?? null, unit)}
+                      {listing.is_shared_stay
+                        ? listing.shared_weekly_price_pence && listing.shared_weekly_price_pence > 0
+                          ? `£${(
+                              listing.shared_weekly_price_pence /
+                              100 /
+                              Math.max(1, Math.round(listing.shared_total_spots ?? 1))
+                            ).toLocaleString("en-GB", {
+                              maximumFractionDigits: 0,
+                            })} / person / week`
+                          : "Shared price not set"
+                        : formatPrice(price ?? null, unit)}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Button

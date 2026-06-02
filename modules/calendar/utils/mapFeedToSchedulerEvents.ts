@@ -77,6 +77,13 @@ const toReservationRecord = (
   currency: booking.currency,
   address: listingById[booking.listingId]?.address,
   bookingType: booking.bookingType,
+  flexMode: booking.flexMode ?? null,
+  flexCurrentConfirmedEnd: booking.flexCurrentConfirmedEnd ?? null,
+  flexMaxEnd: booking.flexMaxEnd ?? null,
+  flexExtensionCutoffAt: booking.flexExtensionCutoffAt ?? null,
+  flexExtraNight: booking.flexExtraNight,
+  flexExtraNightStatus: booking.flexExtraNightStatus ?? null,
+  flexExtraNightPricePence: booking.flexExtraNightPricePence ?? null,
   isBlock: false,
 });
 
@@ -140,22 +147,42 @@ export function mapFeedToSchedulerEvents(feed: CalendarFeed): SchedulerEventMapR
   const blockEvents = feed.blocks
     .filter((block) => block.listingId && block.start && block.end)
     .map((block) => {
+      const isOptionalFlex = block.blockType === "flex_optional";
+      const isRollingFlexHold = block.blockType === "flex_rolling_held";
+      const isSharedGroup = block.blockType === "shared_group";
       const eventId = `block-${block.id}`;
       const start = toDateOnly(block.start);
       const end = toDateOnly(block.end);
+      const sharedOccupied =
+        (block.sharedFilledSpots ?? 0) + (block.sharedPendingSpots ?? 0);
+      const sharedLabel = isSharedGroup
+        ? `Shared stay ${sharedOccupied}/${block.sharedTotalSpots ?? 0} filled`
+        : null;
 
       reservationsByEventId[eventId] = {
         id: block.id,
         listingId: block.listingId,
         listingTitle: listingById[block.listingId]?.title ?? "Listing",
-        guestName: block.reason?.trim() || "Blocked",
+        guestName: isSharedGroup
+          ? "Shared crew stay"
+          : isRollingFlexHold
+          ? "Flex hold"
+          : block.reason?.trim() || "Blocked",
         start: block.start,
         end: block.end,
         channel: "manual",
-        status: "blocked",
+        status: isSharedGroup ? "shared" : isRollingFlexHold ? "reserved" : "blocked",
         address: listingById[block.listingId]?.address,
         isBlock: true,
         bookingType: "nightly",
+        flexMode: isRollingFlexHold ? "rolling" : null,
+        flexCurrentConfirmedEnd: isRollingFlexHold ? block.confirmedEnd ?? null : null,
+        flexMaxEnd: isRollingFlexHold ? block.maxEnd ?? null : null,
+        flexExtensionCutoffAt: isRollingFlexHold ? block.cutoffAt ?? null : null,
+        sharedGroupId: isSharedGroup ? block.sharedGroupId ?? null : null,
+        sharedTotalSpots: isSharedGroup ? block.sharedTotalSpots ?? null : null,
+        sharedFilledSpots: isSharedGroup ? block.sharedFilledSpots ?? null : null,
+        sharedPendingSpots: isSharedGroup ? block.sharedPendingSpots ?? null : null,
       };
 
       const eventStart = new Date(`${start}T00:00:00`);
@@ -169,19 +196,45 @@ export function mapFeedToSchedulerEvents(feed: CalendarFeed): SchedulerEventMapR
       return {
         id: eventId,
         resource: block.listingId,
-        text: "Blocked",
+        text: isSharedGroup
+          ? sharedLabel ?? "Shared group"
+          : isRollingFlexHold
+          ? "Flex hold"
+          : isOptionalFlex
+          ? "Optional night"
+          : "Blocked",
         start,
         end,
         tags: {
           reservationId: block.id,
           kind: "block",
           channel: "manual",
-          status: "blocked",
+          status: isSharedGroup
+            ? "shared"
+            : isOptionalFlex || isRollingFlexHold
+            ? "reserved"
+            : "blocked",
         },
-        backColor: "#94a3b8",
-        borderColor: "rgba(51,65,85,0.35)",
-        fontColor: "#0f172a",
-        cssClass: "avyro-dp-event avyro-dp-event--channel-block",
+        backColor: isSharedGroup
+          ? "#fef9c3"
+          : isRollingFlexHold
+          ? "#e8eef9"
+          : isOptionalFlex
+          ? "#e2e8f0"
+          : "#94a3b8",
+        borderColor: isRollingFlexHold
+          ? "rgba(37,99,235,0.55)"
+          : isSharedGroup
+          ? "rgba(202,138,4,0.45)"
+          : isOptionalFlex
+          ? "rgba(100,116,139,0.55)"
+          : "rgba(51,65,85,0.35)",
+        fontColor: isSharedGroup ? "#78350f" : "#0f172a",
+        cssClass: `avyro-dp-event avyro-dp-event--channel-block${
+          isOptionalFlex ? " avyro-dp-event--optional-night" : ""
+        }${isRollingFlexHold ? " avyro-dp-event--rolling-hold" : ""}${
+          isRollingFlexHold ? " avyro-dp-event--optional-night" : ""
+        }${isSharedGroup ? " avyro-dp-event--shared-group" : ""}`,
         areas: [
           {
             right: 8,

@@ -1,7 +1,6 @@
 // pages/index.tsx
 // Home — refined hero, search-first experience, category rows
 
-import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/router";
 import SearchBar from "@/components/SearchBar";
@@ -68,7 +67,7 @@ const DividerPinIcon = ({ className }: DividerIconProps) => (
   </svg>
 );
 
-const DividerShieldIcon = ({ className }: DividerIconProps) => (
+const DividerCalendarIcon = ({ className }: DividerIconProps) => (
   <svg
     viewBox="0 0 24 24"
     fill="none"
@@ -79,12 +78,12 @@ const DividerShieldIcon = ({ className }: DividerIconProps) => (
     aria-hidden
     className={className}
   >
-    <path d="M12 3 5 6v6c0 5 3.4 8.1 7 9 3.6-.9 7-4 7-9V6l-7-3Z" />
-    <path d="m9.5 12 1.8 1.8 3.4-3.4" />
+    <rect x="4" y="5" width="16" height="14" rx="2.5" />
+    <path d="M4 10h16" />
   </svg>
 );
 
-const DividerPriceIcon = ({ className }: DividerIconProps) => (
+const DividerCheckIcon = ({ className }: DividerIconProps) => (
   <svg
     viewBox="0 0 24 24"
     fill="none"
@@ -95,40 +94,12 @@ const DividerPriceIcon = ({ className }: DividerIconProps) => (
     aria-hidden
     className={className}
   >
-    <rect x="3" y="6" width="18" height="12" rx="2.5" />
-    <path d="M7 12h10" />
-    <path d="M12 9v6" />
+    <path d="M20 7 9 18l-5-5" />
   </svg>
 );
 
 export default function Home() {
   const router = useRouter();
-
-  const dividerRef = useRef<HTMLElement | null>(null);
-  const [dividerVisible, setDividerVisible] = useState(false);
-
-  useEffect(() => {
-    const node = dividerRef.current;
-    if (!node || dividerVisible) return;
-
-    if (typeof IntersectionObserver === "undefined") {
-      setDividerVisible(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (!entry?.isIntersecting) return;
-        setDividerVisible(true);
-        observer.disconnect();
-      },
-      { threshold: 0.25 }
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [dividerVisible]);
 
   // --- Render --------------------------------------------------------------
   return (
@@ -211,40 +182,39 @@ export default function Home() {
         </div>
       </section>
 
-      <section
-        ref={dividerRef}
-        className={`border-b border-t border-white/5 bg-[#0F172A] py-12 transition-all duration-[600ms] ease-out md:py-16 ${
-          dividerVisible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
-        }`}
-      >
-        <div className="mx-auto max-w-7xl px-6 lg:px-8">
-          <div className="mx-auto max-w-4xl text-center">
-            <div className="mx-auto mb-6 h-px w-24 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-            <h2 className="relative text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              Built for professionals, not tourists
+      <section className="border-y border-white/5 bg-[#0F172A] py-10 md:py-12">
+        <div className="mx-auto max-w-6xl px-4">
+          <div className="mb-6">
+            <h2 className="text-2xl font-semibold tracking-tight text-white">
+              Built around real schedules
             </h2>
-            <p className="mx-auto mt-4 max-w-3xl text-base leading-7 text-slate-300 sm:text-lg">
-              Reliable stays near airports, built around real crew schedules — not holiday bookings.
-            </p>
           </div>
 
-          <div className="mx-auto mt-10 grid max-w-4xl grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+          <div className="grid gap-4 md:grid-cols-3">
             {[
-              { label: "Near major airports", Icon: DividerPinIcon },
-              { label: "Verified hosts", Icon: DividerShieldIcon },
-              { label: "Transparent pricing", Icon: DividerPriceIcon },
-            ].map(({ label, Icon }) => (
-              <div
-                key={label}
-                className="group flex min-h-[58px] items-center justify-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.02] px-5 py-4 transition duration-200 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.04]"
-              >
-                <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/[0.05] text-amber-300/75 transition-colors duration-200 group-hover:bg-white/[0.08] group-hover:text-amber-200">
-                  <Icon className="h-4 w-4" />
+              {
+                title: "Search by airport",
+                body: "Start from the airport you operate from and filter by commute time.",
+                icon: DividerPinIcon,
+              },
+              {
+                title: "Choose the stay type",
+                body: "Pick overnight, day-use, or longer formats based on duty windows.",
+                icon: DividerCalendarIcon,
+              },
+              {
+                title: "Book with clear rules",
+                body: "Transparent pricing and enforced booking modes reduce surprises.",
+                icon: DividerCheckIcon,
+              },
+            ].map((item) => (
+              <article key={item.title} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 md:p-6">
+                <span className="inline-flex h-7 w-7 items-center justify-center text-slate-300">
+                  <item.icon className="h-4 w-4" />
                 </span>
-                <span className="text-sm font-medium text-slate-300 transition-colors duration-200 group-hover:text-white">
-                  {label}
-                </span>
-              </div>
+                <h3 className="mt-4 text-base font-semibold text-white">{item.title}</h3>
+                <p className="mt-2 text-sm leading-7 text-slate-300 md:leading-6">{item.body}</p>
+              </article>
             ))}
           </div>
         </div>
@@ -318,129 +288,68 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-8 pt-6 lg:pb-10 lg:pt-8">
-        <div className="mb-6">
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Stay types designed around real schedules
-          </h2>
-        </div>
+      <section className="bg-[#fafafa]">
+        <div className="mx-auto max-w-6xl px-4 py-10 lg:py-12">
+          <div className="max-w-3xl">
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+              Designed around real crew schedules
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600 sm:text-base">
+              Whether it&apos;s a quick turnaround or a repeat rotation, find stays that fit how you
+              actually work.
+            </p>
+          </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          {[
-            {
-              title: "Day-use stays",
-              body: "For quick rest windows, standby time, and between-duty recovery.",
-              ctaLabel: "Explore day-use stays",
-              href: "/search?mode=day_use",
-              icon: (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                  <circle cx="12" cy="12" r="8" />
-                  <path d="M12 8v4l3 2" />
-                </svg>
-              ),
-            },
-            {
-              title: "Extended stays",
-              body: "For repeat rotations, training blocks, and longer assignments.",
-              ctaLabel: "Explore extended stays",
-              href: "/search?mode=extended",
-              icon: (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                  <path d="M4 20h16" />
-                  <path d="M6 20V8h12v12" />
-                  <path d="M9 12h.01M12 12h.01M15 12h.01" />
-                </svg>
-              ),
-            },
-          ].map((item) => (
-            <article key={item.title} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-700">
-                {item.icon}
-              </span>
-              <h3 className="mt-4 text-lg font-semibold text-slate-900">{item.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
-              <div className="mt-5 flex items-center justify-between gap-3">
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            {[
+              {
+                title: "Day-use stays",
+                body: "For quick rest windows, standby time, and between-duty recovery.",
+                ctaLabel: "Explore day-use stays",
+                href: "/search?mode=day_use",
+              },
+              {
+                title: "Extended stays",
+                body: "For repeat rotations, training blocks, and longer assignments.",
+                ctaLabel: "Explore extended stays",
+                href: "/search?mode=extended",
+              },
+            ].map((item) => (
+              <article
+                key={item.title}
+                className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <h3 className="text-lg font-semibold text-slate-900">{item.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
                 <button
                   type="button"
                   onClick={() => router.push(item.href)}
-                  className="text-sm font-semibold text-slate-900 transition hover:text-slate-700"
+                  className="mt-5 text-sm font-semibold text-slate-900 transition hover:text-slate-700"
                 >
                   {item.ctaLabel} →
                 </button>
-                <span className="text-xs text-slate-500">Available on eligible listings</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-4 pb-8 pt-1 lg:pb-10">
-        <div className="mb-6">
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-            Built around real schedules
-          </h2>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            {
-              title: "Search by airport",
-              body: "Start from the airport you operate from and filter by commute time.",
-              icon: (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                  <path d="M12 22s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z" />
-                  <circle cx="12" cy="10" r="2.8" />
-                </svg>
-              ),
-            },
-            {
-              title: "Choose the stay type",
-              body: "Pick overnight, day-use, or longer formats based on duty windows.",
-              icon: (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                  <rect x="3" y="5" width="18" height="15" rx="2.5" />
-                  <path d="M3 10h18" />
-                </svg>
-              ),
-            },
-            {
-              title: "Book with clear rules",
-              body: "Transparent pricing and enforced booking modes reduce surprises.",
-              icon: (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                  <path d="M20 7 9 18l-5-5" />
-                </svg>
-              ),
-            },
-          ].map((item) => (
-            <article key={item.title} className="rounded-2xl border border-slate-200/80 bg-slate-50/40 p-5">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-700 shadow-sm">
-                {item.icon}
-              </span>
-              <h3 className="mt-4 text-base font-semibold text-slate-900">{item.title}</h3>
-              <p className="mt-2 text-sm leading-6 text-slate-600">{item.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-4 pb-12 pt-1 lg:pb-14">
-        <div className="rounded-[28px] border border-slate-800 bg-slate-900 px-7 py-10 text-white shadow-sm md:flex md:items-center md:justify-between md:px-10 md:py-12">
-          <div className="max-w-2xl">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Host with Avyro</p>
-            <h2 className="mt-3 text-3xl font-semibold leading-tight">
-              Host near an airport? List with Avyro
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-slate-300">
-              Attract professional guests, set clear booking rules, and offer stays that fit real schedules.
-            </p>
+              </article>
+            ))}
           </div>
-          <button
-            onClick={() => router.push("/host/create-listing")}
-            className="mt-6 rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 md:mt-0"
-          >
-            Become a host
-          </button>
+
+          <div className="mt-5 rounded-[28px] border border-slate-800 bg-slate-900 px-7 py-11 text-white shadow-sm md:flex md:items-center md:justify-between md:px-10 md:py-12">
+            <div className="max-w-2xl">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">For hosts</p>
+              <h2 className="mt-3 text-3xl font-semibold leading-tight md:text-[34px]">
+                List your property near an airport
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                Attract professional guests, set clear booking rules, and offer stay types that
+                match real crew schedules.
+              </p>
+            </div>
+            <button
+              onClick={() => router.push("/host/create-listing")}
+              className="mt-6 rounded-full bg-white px-6 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 md:mt-0"
+            >
+              Become a host
+            </button>
+          </div>
         </div>
       </section>
 
@@ -453,7 +362,7 @@ export default function Home() {
           <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-14 lg:grid-cols-[1.2fr_1fr]">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.32em] text-slate-400">
-                Avyro platform
+                Veloro platform
               </p>
               <h2 className="mt-4 text-3xl font-semibold text-white md:text-4xl">
                 Operational stays for crews and teams.
@@ -480,7 +389,7 @@ export default function Home() {
                 },
                 {
                   title: "Company",
-                  links: ["About Avyro", "Careers", "Press", "Security", "Privacy"],
+                  links: ["About Veloro", "Careers", "Press", "Security", "Privacy"],
                 },
                 {
                   title: "Support",
@@ -503,7 +412,7 @@ export default function Home() {
             </div>
           </div>
           <div className="relative mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 border-t border-slate-800 px-4 py-6 text-xs text-slate-400">
-            <span>© 2026 Avyro. All rights reserved.</span>
+            <span>© 2026 Veloro. All rights reserved.</span>
             <span>United Kingdom · Europe</span>
           </div>
         </div>

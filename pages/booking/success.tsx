@@ -157,8 +157,8 @@ export default function BookingSuccessPage() {
     const end = new Date(booking.check_out);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     const endExclusive = addDays(end, 1);
-    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Aeronooc stay";
-    const details = `Aeronooc booking ${booking.id}`;
+    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Veloro stay";
+    const details = `Veloro booking ${booking.id}`;
     const location = booking.listing?.location ?? "";
     const url = new URL("https://calendar.google.com/calendar/render");
     url.searchParams.set("action", "TEMPLATE");
@@ -175,22 +175,22 @@ export default function BookingSuccessPage() {
     const end = new Date(booking.check_out);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
     const endExclusive = addDays(end, 1);
-    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Aeronooc stay";
-    const location = booking.listing?.location ?? "Aeronooc stay";
+    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Veloro stay";
+    const location = booking.listing?.location ?? "Veloro stay";
     const now = new Date();
     const ics = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Aeronooc//Booking//EN",
+      "PRODID:-//Veloro//Booking//EN",
       "CALSCALE:GREGORIAN",
       "BEGIN:VEVENT",
-      `UID:booking-${booking.id}@aeronooc`,
+      `UID:booking-${booking.id}@veloro`,
       `DTSTAMP:${now.toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
       `DTSTART;VALUE=DATE:${toGoogleDate(start)}`,
       `DTEND;VALUE=DATE:${toGoogleDate(endExclusive)}`,
       `SUMMARY:${escapeICS(summary)}`,
       `LOCATION:${escapeICS(location)}`,
-      `DESCRIPTION:${escapeICS(`Booking ${booking.id} via Aeronooc`)}`,
+      `DESCRIPTION:${escapeICS(`Booking ${booking.id} via Veloro`)}`,
       "END:VEVENT",
       "END:VCALENDAR",
     ].join("\r\n");
@@ -199,7 +199,7 @@ export default function BookingSuccessPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `aeronooc-booking-${booking?.id}.ics`;
+    link.download = `veloro-booking-${booking?.id}.ics`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -318,7 +318,7 @@ export default function BookingSuccessPage() {
               <h1 className="text-2xl font-semibold text-gray-900">Payment successful</h1>
             </div>
             <p className="mt-4 text-sm text-gray-600">
-              Thanks for booking with Aeronooc! We&apos;ve reserved your stay and notified the host.
+              Thanks for booking with Veloro! We&apos;ve reserved your stay and notified the host.
               You&apos;ll receive email confirmation shortly.
             </p>
             {sessionId && (
@@ -353,7 +353,7 @@ export default function BookingSuccessPage() {
                   <p className="text-sm uppercase tracking-[0.3em] text-white/70">
                     Booking confirmed
                   </p>
-                  <h2 className="text-2xl font-semibold">{booking.listing?.title ?? "Aeronooc stay"}</h2>
+                  <h2 className="text-2xl font-semibold">{booking.listing?.title ?? "Veloro stay"}</h2>
                   {booking.listing?.location && (
                     <p className="text-white/80">{booking.listing.location}</p>
                   )}

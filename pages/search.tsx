@@ -4,7 +4,8 @@ import dynamic from "next/dynamic";
 
 import MapListingCard from "@/components/MapListingCardV2";
 import SearchBar from "@/components/SearchBar";
-import { computeAllInPricing } from "@/lib/pricing";
+import { SharedStayFilter } from "@/components/shared-stay/SharedStayFilter";
+import { computeAllInPricing, computeRoundedGuestPricing } from "@/lib/pricing";
 import { supabase } from "@/lib/supabaseClient";
 
 const MapView = dynamic(() => import("@/components/map"), { ssr: false });
@@ -162,6 +163,10 @@ type SearchListing = {
   freeCancellation?: boolean | null;
   reviewOverall?: number | null;
   reviewTotal?: number | null;
+  isSharedStay?: boolean;
+  sharedTotalSpots?: number | null;
+  sharedWeeklyPricePence?: number | null;
+  sharedSpotsRemaining?: number | null;
 };
 
 export default function SearchPage() {
@@ -218,6 +223,7 @@ export default function SearchPage() {
       blackout: get("blackout"),
       quiet: get("quiet"),
       access_24_7: get("access_24_7"),
+      shared_stays: get("shared_stays"),
       sort: get("sort"),
     };
   }, [query]);
@@ -231,6 +237,7 @@ export default function SearchPage() {
       quiet: toBool(current.quiet) ?? false,
       blackout: toBool(current.blackout) ?? false,
       access: toBool(current.access_24_7) ?? false,
+      sharedStays: toBool(current.shared_stays) ?? false,
       commuteMax: current.commute_max || "",
     }),
     []
@@ -267,6 +274,7 @@ export default function SearchPage() {
       q.priceMin,
       q.priceMax,
       q.roomType,
+      q.shared_stays,
       q.quiet,
       q.blackout,
       q.access_24_7,
@@ -379,11 +387,18 @@ export default function SearchPage() {
       }
 
       const guestPriceForStay =
-        computeAllInPricing({
-          hostNetTotalPence: Math.round(hostUnitPrice * unitCount * 100),
-          nights: bookingUnit === "hourly" ? 1 : unitCount,
-          isFirstCompletedBooking: false,
-        }).guest_total_pence / 100;
+        bookingUnit === "nightly" && Number.isInteger(unitCount) && unitCount >= 1
+          ? computeRoundedGuestPricing({
+              hostUnitPence: Math.round(hostUnitPrice * 100),
+              units: unitCount,
+              nightsForFeeTier: unitCount,
+              isFirstCompletedBooking: false,
+            }).total_guest_pence / 100
+          : computeAllInPricing({
+              hostNetTotalPence: Math.round(hostUnitPrice * unitCount * 100),
+              nights: bookingUnit === "hourly" ? 1 : unitCount,
+              isFirstCompletedBooking: false,
+            }).guest_total_pence / 100;
 
       return { ...listing, guestPriceForStay };
     });
@@ -546,8 +561,10 @@ export default function SearchPage() {
         if (wantedType) queryBuilder = queryBuilder.eq("type", wantedType);
         if (!isNaN(priceMin)) queryBuilder = queryBuilder.gte(priceColumn, priceMin);
         if (!isNaN(priceMax)) queryBuilder = queryBuilder.lte(priceColumn, priceMax);
-        if (bookingUnit === "hourly" || bookingUnit === "nightly") {
-          queryBuilder = queryBuilder.eq("booking_unit", bookingUnit);
+        // MVP: keep public search scoped to nightly inventory.
+        queryBuilder = queryBuilder.or("booking_unit.eq.nightly,booking_unit.is.null");
+        if (toBool(q.shared_stays) === true) {
+          queryBuilder = queryBuilder.eq("is_shared_stay", true);
         }
 
         // Room details
@@ -588,8 +605,10 @@ export default function SearchPage() {
           return;
         }
 
-        const normalized: SearchListing[] = (Array.isArray(data) ? data : []).map((l: any) => {
-          const id = String(l.id ?? Math.random().toString(36).slice(2));
+        const rows = Array.isArray(data) ? data : [];
+        const validRows = rows.filter((row: any) => row?.id != null);
+        const normalized: SearchListing[] = validRows.map((l: any) => {
+          const id = String(l.id);
           const airport_code = (l.airport_code ?? l.airport ?? l.iata) as string | undefined;
           const airportCoordPair =
             airport_code && airportCoords[String(airport_code).toUpperCase()]
@@ -696,6 +715,13 @@ export default function SearchPage() {
             taxiMax,
             reviewOverall,
             reviewTotal,
+            isSharedStay: Boolean((l as any).is_shared_stay),
+            sharedTotalSpots:
+              safeNumber(toNumber((l as any).shared_total_spots)) ??
+              null,
+            sharedWeeklyPricePence:
+              safeNumber(toNumber((l as any).shared_weekly_price_pence)) ??
+              null,
           };
         });
 
@@ -712,6 +738,11 @@ export default function SearchPage() {
         // Never show listings that are unavailable for the selected stay window.
         if (hasValidSelectedWindow && filtered.length > 0) {
           const listingIds = filtered.map((listing) => listing.id).filter(Boolean);
+          const sharedListingIdSet = new Set(
+            filtered
+              .filter((listing) => Boolean(listing.isSharedStay))
+              .map((listing) => listing.id)
+          );
           const [{ data: conflictingBookings, error: bookingError }, { data: conflictingBlocks, error: blockError }] =
             await Promise.all([
               supabase
@@ -743,7 +774,10 @@ export default function SearchPage() {
 
           const unavailableListingIds = new Set<string>();
           (conflictingBookings ?? []).forEach((row: any) => {
-            if (row?.listing_id) unavailableListingIds.add(String(row.listing_id));
+            if (!row?.listing_id) return;
+            const listingId = String(row.listing_id);
+            if (sharedListingIdSet.has(listingId)) return;
+            unavailableListingIds.add(listingId);
           });
           (conflictingBlocks ?? []).forEach((row: any) => {
             if (row?.listing_id) unavailableListingIds.add(String(row.listing_id));
@@ -756,6 +790,96 @@ export default function SearchPage() {
           filtered = filtered.filter(
             (l) => l.driveMinutesToAirport != null && l.driveMinutesToAirport <= commuteMax
           );
+        }
+
+        if (hasValidSelectedWindow && filtered.length > 0) {
+          const sharedListingIds = filtered
+            .filter((listing) => Boolean(listing.isSharedStay))
+            .map((listing) => listing.id);
+
+          if (sharedListingIds.length > 0) {
+            const sharedGroupsResult = await supabase
+              .from("shared_groups")
+              .select("id, listing_id, total_spots, status")
+              .in("listing_id", sharedListingIds)
+              .eq("start_date", selectedCheckInDate)
+              .eq("end_date", selectedCheckOutDate)
+              .in("status", ["open", "full"]);
+
+            if (!sharedGroupsResult.error) {
+              const sharedGroups = sharedGroupsResult.data ?? [];
+              const groupIds = sharedGroups.map((row: any) => String(row.id)).filter(Boolean);
+              const occupancyByGroup: Record<string, number> = {};
+
+              if (groupIds.length > 0) {
+                const membersResult = await supabase
+                  .from("shared_group_members")
+                  .select("shared_group_id, status, reservation_expires_at")
+                  .in("shared_group_id", groupIds)
+                  .in("status", ["pending", "confirmed"]);
+
+                const membersFallback =
+                  membersResult.error && String(membersResult.error.message ?? "").includes("reservation_expires_at")
+                    ? await supabase
+                        .from("shared_group_members")
+                        .select("shared_group_id, status")
+                        .in("shared_group_id", groupIds)
+                        .in("status", ["pending", "confirmed"])
+                    : null;
+
+                const membersRows = membersFallback?.data ?? membersResult.data ?? [];
+                const nowMs = Date.now();
+                membersRows.forEach((row: any) => {
+                  const groupId = String(row?.shared_group_id ?? "");
+                  if (!groupId) return;
+                  const status = String(row?.status ?? "").toLowerCase();
+                  if (status === "confirmed") {
+                    occupancyByGroup[groupId] = (occupancyByGroup[groupId] ?? 0) + 1;
+                    return;
+                  }
+                  if (status === "pending") {
+                    const expiresAt = row?.reservation_expires_at
+                      ? new Date(String(row.reservation_expires_at)).getTime()
+                      : Number.POSITIVE_INFINITY;
+                    if (Number.isFinite(expiresAt) && expiresAt <= nowMs) return;
+                    occupancyByGroup[groupId] = (occupancyByGroup[groupId] ?? 0) + 1;
+                  }
+                });
+              }
+
+              const listingRemaining: Record<string, number> = {};
+              const listingWithAnyGroup = new Set<string>();
+              sharedGroups.forEach((group: any) => {
+                const listingId = String(group?.listing_id ?? "");
+                if (!listingId) return;
+                listingWithAnyGroup.add(listingId);
+                const totalSpots = Math.max(1, Number(group?.total_spots ?? 1));
+                const occupied = occupancyByGroup[String(group.id)] ?? 0;
+                const remaining = Math.max(0, totalSpots - occupied);
+                const previous = listingRemaining[listingId];
+                if (previous == null || remaining > previous) {
+                  listingRemaining[listingId] = remaining;
+                }
+              });
+
+              filtered = filtered.map((listing) =>
+                listing.isSharedStay
+                  ? {
+                      ...listing,
+                      sharedSpotsRemaining:
+                        listingRemaining[listing.id] ??
+                        listing.sharedTotalSpots ??
+                        null,
+                    }
+                  : listing
+              );
+              filtered = filtered.filter((listing) => {
+                if (!listing.isSharedStay) return true;
+                if (!listingWithAnyGroup.has(listing.id)) return true;
+                return (listingRemaining[listing.id] ?? 0) > 0;
+              });
+            }
+          }
         }
 
         const withCoords = filtered.filter(
@@ -821,6 +945,7 @@ export default function SearchPage() {
   const clearFiltersExceptAirport = useCallback(() => {
     updateQuery({
       roomType: undefined,
+      shared_stays: undefined,
       priceMin: undefined,
       priceMax: undefined,
       has_wifi: undefined,
@@ -875,6 +1000,13 @@ export default function SearchPage() {
         onClear: () => updateQuery({ roomType: undefined }),
       });
     }
+    if (toBool(q.shared_stays) === true) {
+      items.push({
+        key: "shared",
+        label: "Shared stays",
+        onClear: () => updateQuery({ shared_stays: undefined }),
+      });
+    }
 
     if (toBool(q.quiet) === true) {
       items.push({
@@ -927,6 +1059,7 @@ export default function SearchPage() {
       priceMin: "",
       priceMax: "",
       roomType: "",
+      sharedStays: false,
       quiet: false,
       blackout: false,
       access: false,
@@ -940,6 +1073,7 @@ export default function SearchPage() {
       priceMin: draftFilters.priceMin || undefined,
       priceMax: draftFilters.priceMax || undefined,
       roomType: draftFilters.roomType || undefined,
+      shared_stays: draftFilters.sharedStays || undefined,
       quiet: draftFilters.quiet || undefined,
       blackout: draftFilters.blackout || undefined,
       access_24_7: draftFilters.access || undefined,
@@ -1086,7 +1220,7 @@ export default function SearchPage() {
                 <div className="text-base font-semibold text-slate-900">
                   {emptyModeLabel
                     ? `No ${emptyModeLabel} listings near ${airportCode}.`
-                    : `No Avyro stays match your filters near ${airportCode}.`}
+                    : `No Veloro stays match your filters near ${airportCode}.`}
                 </div>
                 <p className="mt-1 text-sm text-[#4B5563]">
                   {emptyModeLabel
@@ -1389,6 +1523,11 @@ export default function SearchPage() {
               <div className="grid gap-3">
                 {[
                   {
+                    key: "sharedStays",
+                    label: "Shared stays",
+                    helper: "Join or start weekly crew groups.",
+                  },
+                  {
                     key: "quiet",
                     label: "Low-noise environment",
                     helper: "Best for rest and shift recovery.",
@@ -1404,23 +1543,36 @@ export default function SearchPage() {
                     helper: "Late arrivals and early departures.",
                   },
                 ].map((option) => (
-                  <label key={option.key} className="flex items-start gap-3 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={(draftFilters as any)[option.key]}
-                      onChange={(e) =>
+                  option.key === "sharedStays" ? (
+                    <SharedStayFilter
+                      key={option.key}
+                      checked={Boolean((draftFilters as any)[option.key])}
+                      onChange={(checked) =>
                         setDraftFilters((prev) => ({
                           ...prev,
-                          [option.key]: e.target.checked,
+                          [option.key]: checked,
                         }))
                       }
-                      className="mt-1 h-4 w-4 rounded border-slate-300 text-[#FEDD02] focus:ring-[#FEDD02]"
                     />
-                    <span>
-                      <span className="block font-medium text-slate-800">{option.label}</span>
-                      <span className="block text-xs text-slate-500">{option.helper}</span>
-                    </span>
-                  </label>
+                  ) : (
+                    <label key={option.key} className="flex items-start gap-3 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={(draftFilters as any)[option.key]}
+                        onChange={(e) =>
+                          setDraftFilters((prev) => ({
+                            ...prev,
+                            [option.key]: e.target.checked,
+                          }))
+                        }
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-[#FEDD02] focus:ring-[#FEDD02]"
+                      />
+                      <span>
+                        <span className="block font-medium text-slate-800">{option.label}</span>
+                        <span className="block text-xs text-slate-500">{option.helper}</span>
+                      </span>
+                    </label>
+                  )
                 ))}
               </div>
 

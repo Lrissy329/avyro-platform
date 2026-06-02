@@ -16,6 +16,8 @@ export type GuestBookingRecord = {
   listing_id: string;
   host_id: string | null;
   status: GuestBookingStatus;
+  booking_type?: string | null;
+  shared_group_id?: string | null;
   check_in_time?: string | null;
   check_out_time?: string | null;
   check_in?: string | null;
@@ -25,6 +27,19 @@ export type GuestBookingRecord = {
   price_total?: number | null;
   currency?: string | null;
   stripe_status?: string | null;
+  flex_mode?: "none" | "extra_night" | "rolling" | string | null;
+  flex_status?: "inactive" | "active" | "ended" | "released" | "expired" | string | null;
+  flex_min_nights?: number | null;
+  flex_max_nights?: number | null;
+  flex_current_confirmed_end?: string | null;
+  flex_max_end?: string | null;
+  flex_rolling_window_days?: number | null;
+  flex_pricing_multiplier?: number | null;
+  flex_extension_cutoff_at?: string | null;
+  flex_extra_night?: boolean | null;
+  flex_extra_night_status?: string | null;
+  flex_extra_night_price_pence?: number | null;
+  flex_extra_night_cutoff_at?: string | null;
   created_at?: string | null;
 };
 
@@ -32,6 +47,9 @@ export type GuestListingRecord = {
   id: string;
   title: string | null;
   location: string | null;
+  is_shared_stay?: boolean | null;
+  shared_total_spots?: number | null;
+  shared_weekly_price_pence?: number | null;
   address?: string | null;
   check_in_instructions?: string | null;
   check_out_instructions?: string | null;

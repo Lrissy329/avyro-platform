@@ -22,6 +22,19 @@ type MessagingTrayProps = {
   bookingLabel?: string | null;
 };
 
+const isMissingMessageReads = (error: any) => {
+  const code = String(error?.code ?? "").toLowerCase();
+  const message = String(error?.message ?? "").toLowerCase();
+  return (
+    code === "42p01" ||
+    code === "42703" ||
+    code === "pgrst204" ||
+    message.includes("message_reads") ||
+    message.includes("schema cache") ||
+    (message.includes("relation") && message.includes("does not exist"))
+  );
+};
+
 const formatMessageTime = (iso: string) => {
   if (!iso) return "";
   const date = new Date(iso);
@@ -41,6 +54,7 @@ export function MessagingTray({
   const [sending, setSending] = useState(false);
   const [draft, setDraft] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [messageReadsAvailable, setMessageReadsAvailable] = useState(true);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -51,9 +65,9 @@ export function MessagingTray({
 
   const markConversationRead = useCallback(
     async (targetId: string | null) => {
-      if (!targetId || !userId) return;
+      if (!targetId || !userId || !messageReadsAvailable) return;
       try {
-        await supabase.from("message_reads").upsert(
+        const { error } = await supabase.from("message_reads").upsert(
           {
             conversation_id: targetId,
             user_id: userId,
@@ -61,11 +75,16 @@ export function MessagingTray({
           },
           { onConflict: "conversation_id,user_id" }
         );
+        if (error && isMissingMessageReads(error)) {
+          setMessageReadsAvailable(false);
+        }
       } catch (err) {
-        console.warn("[messaging] message_reads not available", err);
+        if (isMissingMessageReads(err)) {
+          setMessageReadsAvailable(false);
+        }
       }
     },
-    [userId]
+    [messageReadsAvailable, userId]
   );
 
   const loadMessages = useCallback(async () => {

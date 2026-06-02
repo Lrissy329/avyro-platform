@@ -54,6 +54,13 @@ export function mapFeedToMonthEvents(feed: CalendarFeed): EventMapResult {
         currency: booking.currency,
         address: listingById[booking.listingId]?.address,
         bookingType: booking.bookingType,
+        flexMode: booking.flexMode ?? null,
+        flexCurrentConfirmedEnd: booking.flexCurrentConfirmedEnd ?? null,
+        flexMaxEnd: booking.flexMaxEnd ?? null,
+        flexExtensionCutoffAt: booking.flexExtensionCutoffAt ?? null,
+        flexExtraNight: booking.flexExtraNight ?? null,
+        flexExtraNightStatus: booking.flexExtraNightStatus ?? null,
+        flexExtraNightPricePence: booking.flexExtraNightPricePence ?? null,
         isBlock: false,
       };
 
@@ -88,24 +95,59 @@ export function mapFeedToMonthEvents(feed: CalendarFeed): EventMapResult {
         id: block.id,
         listingId: block.listingId,
         listingTitle: listingById[block.listingId]?.title ?? "Listing",
-        guestName: block.reason?.trim() || "Blocked",
+        guestName:
+          block.blockType === "shared_group"
+            ? "Shared stay"
+            : block.blockType === "flex_rolling_held"
+            ? "Flex hold"
+            : block.reason?.trim() || "Blocked",
         start: block.start,
         end: block.end,
         channel: "manual",
-        status: "blocked",
+        status:
+          block.blockType === "shared_group"
+            ? "shared"
+            : block.blockType === "flex_rolling_held"
+            ? "reserved"
+            : "blocked",
         address: listingById[block.listingId]?.address,
         isBlock: true,
-        bookingType: block.blockType,
+        bookingType: block.blockType === "hourly" ? "hourly" : "nightly",
+        flexMode: block.blockType === "flex_rolling_held" ? "rolling" : null,
+        flexCurrentConfirmedEnd: block.confirmedEnd ?? null,
+        flexMaxEnd: block.maxEnd ?? null,
+        flexExtensionCutoffAt: block.cutoffAt ?? null,
+        sharedGroupId: block.blockType === "shared_group" ? block.sharedGroupId ?? null : null,
+        sharedTotalSpots: block.blockType === "shared_group" ? block.sharedTotalSpots ?? null : null,
+        sharedFilledSpots: block.blockType === "shared_group" ? block.sharedFilledSpots ?? null : null,
+        sharedPendingSpots: block.blockType === "shared_group" ? block.sharedPendingSpots ?? null : null,
       };
 
       return {
         id: eventId,
-        text: "Blocked",
+        text:
+          block.blockType === "shared_group"
+            ? `Shared stay ${(block.sharedFilledSpots ?? 0) + (block.sharedPendingSpots ?? 0)}/${
+                block.sharedTotalSpots ?? 0
+              } filled`
+            : block.blockType === "flex_rolling_held"
+            ? "Flex hold"
+            : "Blocked",
         start,
         end,
-        backColor: "#94a3b8",
-        borderColor: "rgba(51,65,85,0.35)",
-        fontColor: "#0f172a",
+        backColor:
+          block.blockType === "shared_group"
+            ? "#fef9c3"
+            : block.blockType === "flex_rolling_held"
+            ? "#e8eef9"
+            : "#94a3b8",
+        borderColor:
+          block.blockType === "shared_group"
+            ? "rgba(202,138,4,0.45)"
+            : block.blockType === "flex_rolling_held"
+            ? "rgba(37,99,235,0.55)"
+            : "rgba(51,65,85,0.35)",
+        fontColor: block.blockType === "shared_group" ? "#78350f" : "#0f172a",
         tags: {
           reservationId: block.id,
           listingId: block.listingId,

@@ -3,9 +3,11 @@
 import Link from "next/link";
 import Image from "next/image";
 import type { LinkProps } from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewLabel } from "@/lib/reviews";
-import { computeGuestStayPricing } from "@/lib/pricing";
+import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
+import { SharedStayBadge } from "@/components/shared-stay/SharedStayBadge";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 
@@ -46,6 +48,10 @@ type MapListing = {
   review_total?: number | null;
   reviewOverall?: number | null;
   reviewTotal?: number | null;
+  isSharedStay?: boolean | null;
+  sharedTotalSpots?: number | null;
+  sharedWeeklyPricePence?: number | null;
+  sharedSpotsRemaining?: number | null;
 };
 
 type MapListingCardProps = {
@@ -208,6 +214,8 @@ const CarIcon = () => (
   </svg>
 );
 
+const WIDE_LAYOUT_MIN_WIDTH = 820;
+
 export default function MapListingCardV2({
   listing,
   listingHref,
@@ -217,16 +225,61 @@ export default function MapListingCardV2({
   onLeave,
   onSelect,
 }: MapListingCardProps) {
+  const cardRef = useRef<HTMLElement | null>(null);
+  const [isWideLayout, setIsWideLayout] = useState(false);
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node) return;
+
+    const updateLayout = () => {
+      setIsWideLayout(node.clientWidth >= WIDE_LAYOUT_MIN_WIDTH);
+    };
+
+    updateLayout();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => updateLayout());
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateLayout);
+    return () => window.removeEventListener("resize", updateLayout);
+  }, []);
+
   const bookingUnit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
-  const unitLabel = bookingUnit === "hourly" ? "hour" : "night";
+  const isSharedStay = Boolean(listing.isSharedStay ?? listing.isSharedBookingAllowed);
+  const unitLabel = isSharedStay ? "week" : bookingUnit === "hourly" ? "hour" : "night";
+  const sharedTotalSpotsValue =
+    toNumber(listing.sharedTotalSpots) ?? toNumber((listing as any).shared_total_spots) ?? 1;
+  const sharedSpotDivisor = Math.max(1, Math.round(Number(sharedTotalSpotsValue)) || 1);
+  const sharedWeeklyPricePenceValue =
+    toNumber(listing.sharedWeeklyPricePence) ??
+    toNumber((listing as any).shared_weekly_price_pence);
+  const sharedWeeklyPriceMajor =
+    sharedWeeklyPricePenceValue != null
+      ? computeSharedPerPersonWeeklyPricePence({
+          totalWeeklyPricePence: Number(sharedWeeklyPricePenceValue),
+          totalSpots: sharedSpotDivisor,
+        }).rounded_per_person_weekly_pence / 100
+      : null;
   const hostBasePrice =
-    bookingUnit === "hourly"
+    isSharedStay
+      ? sharedWeeklyPriceMajor
+      : bookingUnit === "hourly"
       ? toNumber(listing.pricePerHour) ?? toNumber(listing.price)
       : toNumber(listing.pricePerNight) ?? toNumber(listing.price);
   const stayUnits = staySummary?.units ?? 0;
-  const resolvedUnits = stayUnits > 0 ? stayUnits : 1;
+  const resolvedUnits = isSharedStay
+    ? stayUnits > 0 && staySummary?.unitLabel === "night"
+      ? Math.max(1, Math.ceil(stayUnits / 7))
+      : 1
+    : stayUnits > 0
+    ? stayUnits
+    : 1;
   const stayPricing =
-    hostBasePrice != null
+    hostBasePrice != null && !isSharedStay
       ? computeGuestStayPricing({
           hostNetUnitMajor: hostBasePrice,
           units: resolvedUnits,
@@ -234,8 +287,16 @@ export default function MapListingCardV2({
           isFirstCompletedBooking: false,
         })
       : null;
-  const guestUnitPrice = stayPricing?.guest_unit_avg_major ?? null;
-  const stayTotal = stayUnits > 0 ? stayPricing?.guest_total_major ?? null : null;
+  const guestUnitPrice = isSharedStay ? sharedWeeklyPriceMajor : stayPricing?.guest_unit_avg_major ?? null;
+  const stayTotal = isSharedStay
+    ? stayUnits > 0 && staySummary?.unitLabel === "night"
+      ? guestUnitPrice != null
+        ? guestUnitPrice * resolvedUnits
+        : null
+      : null
+    : stayUnits > 0
+    ? stayPricing?.guest_total_major ?? null
+    : null;
   const showStayTotal = stayTotal != null;
 
   const tag = buildTag(listing);
@@ -244,7 +305,7 @@ export default function MapListingCardV2({
   const titleLine = buildTitle(listing);
   const factsLine = buildFacts(listing);
   const imageSrc = pickImage(listing);
-  const badgeText = listing.isSharedBookingAllowed ? "SHARED BOOKING" : "OVERNIGHT";
+  const badgeText = isSharedStay ? "SHARED STAY" : "OVERNIGHT";
 
   const reviewOverall = toNumber(listing.review_overall ?? listing.reviewOverall);
   const reviewTotal = toNumber(listing.review_total ?? listing.reviewTotal);
@@ -256,38 +317,103 @@ export default function MapListingCardV2({
     ? `${transportInfo.mode} · ${transportMinutes} to ${listing.airportCode ?? "airport"}`
     : null;
   const summaryText = buildSummary(listing, transportText);
+  const sharedSummaryText = isSharedStay
+    ? "Join a weekly crew group and pay per person. Start a group if one is not open yet."
+    : null;
   const locationText = listing.coordsMissing
     ? listing.locationFallback ?? listing.location ?? ""
     : listing.location ?? listing.locationFallback ?? "";
   const showStayTotalDetails = showStayTotal && stayTotal != null;
   const unitLine =
     guestUnitPrice != null
-      ? `${formatCurrency(guestUnitPrice)} avg per ${unitLabel}`
+      ? isSharedStay
+        ? `${formatCurrency(guestUnitPrice)} per person / week`
+        : `${formatCurrency(guestUnitPrice)} avg per ${unitLabel}`
       : null;
+  const keyTags = [listing.airportCode, typeLabel, isSharedStay ? "Shared stay" : tag].filter(
+    (value): value is string => Boolean(value)
+  );
+  const visibleTags = isWideLayout ? keyTags.slice(0, 3) : keyTags.slice(0, 2);
+  const sharedSpotsRemainingValue =
+    toNumber(listing.sharedSpotsRemaining) ??
+    toNumber((listing as any).shared_spots_remaining);
   const href = listingHref ?? (listing.id ? `/listing/${listing.id}` : "#");
+
+  const renderPrice = (compact = false) => {
+    if (guestUnitPrice == null) {
+      return <div className="text-sm text-neutral-500">Price unavailable</div>;
+    }
+
+    const priceAmount = showStayTotalDetails && stayTotal != null ? stayTotal : guestUnitPrice;
+    const valueClass = compact
+      ? "text-2xl font-semibold tracking-tight text-neutral-900"
+      : "text-3xl font-semibold tracking-tight text-neutral-900";
+    const detailClass = compact ? "text-xs text-neutral-600" : "text-sm text-neutral-600";
+    const footnoteClass = compact ? "mt-0.5 text-[11px] text-neutral-500" : "mt-1 text-xs text-neutral-500";
+
+    return (
+      <>
+        <div className={valueClass}>{formatCurrency(priceAmount)}</div>
+        {showStayTotalDetails ? (
+          <>
+            <div className={detailClass}>
+              for {resolvedUnits} {unitLabel}
+              {resolvedUnits === 1 ? "" : "s"}
+            </div>
+            {unitLine && <div className={detailClass}>{unitLine}</div>}
+          </>
+        ) : (
+          <div className={detailClass}>
+            {isSharedStay ? "per person / week" : `per ${unitLabel}`}
+          </div>
+        )}
+        <div className={footnoteClass}>
+          {isSharedStay
+            ? sharedSpotsRemainingValue != null
+              ? sharedSpotsRemainingValue <= 0
+                ? "Full"
+                : `${Math.max(0, Math.round(sharedSpotsRemainingValue))} spot${
+                    Math.max(0, Math.round(sharedSpotsRemainingValue)) === 1 ? "" : "s"
+                  } left`
+              : "Each guest books and pays individually"
+            : "includes taxes & fees"}
+        </div>
+      </>
+    );
+  };
 
   return (
     <Link
       href={href}
+      prefetch={false}
       className="block no-underline hover:no-underline"
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
       onClick={() => onSelect?.()}
     >
       <article
-        className={`grid min-h-[190px] grid-cols-[42%_1fr] gap-4 rounded-[24px] border border-neutral-200 bg-white p-3 shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md sm:grid-cols-[220px_1fr] md:min-h-[210px] md:p-4 lg:grid-cols-[240px_1fr_190px] ${
+        ref={cardRef}
+        className={`grid items-stretch rounded-[24px] border border-neutral-200 bg-white shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md ${
+          isWideLayout
+            ? "min-h-[210px] grid-cols-[180px_minmax(0,1fr)_120px] gap-4 p-4"
+            : "min-h-[190px] grid-cols-[150px_minmax(0,1fr)] gap-3 p-3"
+        } ${
           active ? "border-neutral-400 shadow-md" : ""
         }`}
       >
-        <div className="relative h-full w-full overflow-hidden rounded-2xl bg-neutral-100">
+        <div
+          className={`relative w-full overflow-hidden rounded-2xl bg-neutral-100 ${
+            isWideLayout ? "h-[178px]" : "h-full min-h-[164px]"
+          }`}
+        >
           <Image
             src={imageSrc}
             alt={listing.title ?? "Listing image"}
             fill
             className="object-cover"
-            sizes="(min-width: 1024px) 240px, (min-width: 640px) 220px, 42vw"
+            sizes={isWideLayout ? "180px" : "150px"}
           />
-          <span className="absolute bottom-3 left-3 rounded-full bg-black px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#FEDD02]">
+          <span className="absolute bottom-3 left-3 rounded-full bg-black px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#FEDD02]">
             {badgeText}
           </span>
           <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-base text-neutral-700 shadow-sm">
@@ -295,39 +421,44 @@ export default function MapListingCardV2({
           </span>
         </div>
 
-        <div className="flex h-full flex-col gap-2 md:gap-2.5">
-          <div>
-            <h3 className="text-xl font-semibold leading-tight text-neutral-900 underline underline-offset-2">
-              {titleLine}
-            </h3>
-            {locationText && <div className="mt-1 text-sm text-neutral-600">{locationText}</div>}
+        <div className={`flex h-full min-w-0 flex-col ${isWideLayout ? "gap-2.5" : "gap-2"}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3
+                className={`line-clamp-2 font-semibold leading-tight text-neutral-900 ${
+                  isWideLayout ? "text-lg" : "text-base"
+                }`}
+              >
+                {titleLine}
+              </h3>
+              {locationText && <div className="mt-1 line-clamp-1 text-sm text-neutral-600">{locationText}</div>}
+            </div>
+            {!isWideLayout ? <div className="shrink-0 text-right">{renderPrice(true)}</div> : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-600">
-            {listing.airportCode && (
-              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1 font-semibold">
-                {listing.airportCode}
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-600">
+            {visibleTags.map((tagLabel) => (
+              <span
+                key={tagLabel}
+                className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1"
+              >
+                {tagLabel}
               </span>
-            )}
-            {typeLabel && (
-              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1">
-                {typeLabel}
-              </span>
-            )}
-            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 font-medium text-emerald-800">
-              {tag}
-            </span>
-            {factsLine && <span>{factsLine}</span>}
+            ))}
           </div>
 
-          <p className="line-clamp-3 text-sm leading-5 text-neutral-700">{summaryText}</p>
+          <SharedStayBadge
+            isSharedStay={isSharedStay}
+            perPersonWeeklyPrice={sharedWeeklyPriceMajor}
+            spotsRemaining={listing.sharedSpotsRemaining ?? null}
+            totalSpots={listing.sharedTotalSpots ?? null}
+          />
 
-          <div className="space-y-1 text-sm">
-            {listing.freeCancellation && <div className="font-medium text-emerald-700">Fully refundable</div>}
-            <div className="text-neutral-600">All fees included in shown price</div>
-          </div>
+          <p className="line-clamp-2 text-sm leading-5 text-neutral-700">
+            {sharedSummaryText ?? summaryText}
+          </p>
 
-          <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-600">
+          <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-600">
             {transportText && (
               <span className="inline-flex items-center gap-1.5">
                 {transportInfo?.mode === "Public transport" ? <BusIcon /> : <CarIcon />}
@@ -338,36 +469,18 @@ export default function MapListingCardV2({
               <span className="inline-flex items-center gap-1">
                 <span className="font-semibold text-neutral-900">{reviewOverall.toFixed(1)}</span>
                 <span>· {reviewLabel ?? "Rated stay"}</span>
-                <span>· {reviewTotal} reviews</span>
+                <span>({reviewTotal})</span>
               </span>
             )}
+            {isWideLayout && factsLine ? <span>{factsLine}</span> : null}
           </div>
         </div>
 
-        <div className="flex flex-col justify-end text-right lg:border-l lg:border-neutral-100 lg:pl-4">
-          {guestUnitPrice != null && (
-            <>
-              <div className="text-3xl font-semibold tracking-tight text-neutral-900">
-                {showStayTotalDetails ? formatCurrency(stayTotal) : formatCurrency(guestUnitPrice)}
-              </div>
-              {showStayTotalDetails ? (
-                <>
-                  <div className="text-sm text-neutral-600">
-                    for {stayUnits} {unitLabel}
-                    {stayUnits === 1 ? "" : "s"}
-                  </div>
-                  {unitLine && <div className="text-sm text-neutral-600">{unitLine}</div>}
-                </>
-              ) : (
-                <div className="text-sm text-neutral-600">per {unitLabel}</div>
-              )}
-              <div className="mt-1 text-xs text-neutral-500">includes taxes & fees</div>
-            </>
-          )}
-          {guestUnitPrice == null && (
-            <div className="text-sm text-neutral-500">Price unavailable</div>
-          )}
-        </div>
+        {isWideLayout ? (
+          <div className="flex flex-col justify-end border-l border-neutral-100 pl-3 text-right">
+            {renderPrice(false)}
+          </div>
+        ) : null}
 
       </article>
     </Link>

@@ -52,34 +52,9 @@ export function GuestShellLayout({ activeNav, title, children }: GuestShellLayou
       return;
     }
 
-    let reads: Array<{ conversation_id: string; last_read_at: string | null }> = [];
-    try {
-      const { data: readRows, error: readError } = await supabase
-        .from("message_reads")
-        .select("conversation_id, last_read_at")
-        .eq("user_id", userId);
-      if (!readError && readRows) {
-        reads = readRows as Array<{ conversation_id: string; last_read_at: string | null }>;
-      }
-    } catch {
-      // message_reads may not exist in all environments.
-    }
-
-    const readMap = reads.reduce<Record<string, number>>((acc, row) => {
-      if (row.last_read_at) {
-        acc[row.conversation_id] = new Date(row.last_read_at).getTime();
-      }
-      return acc;
-    }, {});
-
     const unread = (conversations as ConversationRow[]).reduce((count, conversation) => {
       if (!conversation.last_message_at) return count;
-      const lastMessageAt = new Date(conversation.last_message_at).getTime();
-      const lastReadAt = readMap[conversation.id];
-      if (!lastReadAt || lastMessageAt > lastReadAt) {
-        return count + 1;
-      }
-      return count;
+      return count + 1;
     }, 0);
 
     setUnreadCount(unread);
@@ -101,11 +76,6 @@ export function GuestShellLayout({ activeNav, title, children }: GuestShellLayou
           if (row.host_id !== userId && row.guest_id !== userId) return;
           refreshUnread();
         }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "message_reads", filter: `user_id=eq.${userId}` },
-        () => refreshUnread()
       )
       .subscribe();
 
@@ -136,7 +106,7 @@ export function GuestShellLayout({ activeNav, title, children }: GuestShellLayou
             avy
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-slate-900">Avyro</span>
+            <span className="text-sm font-semibold text-slate-900">Veloro</span>
             <span className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Guest dashboard</span>
           </div>
         </div>

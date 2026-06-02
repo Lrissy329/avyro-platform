@@ -833,8 +833,16 @@ html, body, #__next { height: 100%; }
   cursor: not-allowed;
 }
 
+.availability-datepicker .avyro-day-held {
+  position: relative;
+  background-color: rgba(11, 13, 16, 0.04) !important;
+  color: #64748b !important;
+  cursor: not-allowed;
+}
+
 .availability-datepicker .avyro-day-booked::after,
-.availability-datepicker .avyro-day-blocked::after {
+.availability-datepicker .avyro-day-blocked::after,
+.availability-datepicker .avyro-day-held::after {
   content: "";
   position: absolute;
   left: 6px;
@@ -1019,6 +1027,19 @@ html, body, #__next { height: 100%; }
 .avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-other,
 .avyro-daypilot-scheduler .scheduler_default_event.avyro-dp-event.avyro-dp-event--channel-block {
   background: linear-gradient(180deg, #64748b 0%, #475569 100%) !important;
+}
+
+.avyro-daypilot-scheduler
+  .scheduler_default_event.avyro-dp-event.avyro-dp-event--optional-night {
+  background: #e2e8f0 !important;
+  border: 1px dashed #64748b !important;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+}
+
+.avyro-daypilot-scheduler
+  .scheduler_default_event.avyro-dp-event.avyro-dp-event--optional-night
+  .scheduler_default_event_inner {
+  color: #334155 !important;
 }
 
 .avyro-daypilot-scheduler .calendar_default_main,

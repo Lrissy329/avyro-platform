@@ -183,7 +183,7 @@ export default function HostDashboardPage() {
               £1,347.09
             </p>
             <p className="mt-1 text-sm text-slate-600">
-              After Avyro and processing fees.
+              After Veloro and processing fees.
             </p>
           </Card>
           <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

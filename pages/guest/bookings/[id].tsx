@@ -3,12 +3,16 @@ import { useRouter } from "next/router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { GuestPageHeader } from "@/components/guest/GuestPageHeader";
+import { RollingFlexCard } from "@/components/guest/RollingFlexCard";
 import { GuestShellLayout } from "@/components/guest/GuestShellLayout";
+import { FlexStayCard } from "@/components/guest/FlexStayCard";
+import { SharedBookingCard } from "@/components/shared-stay/SharedBookingCard";
 import {
   bookingNights,
   bookingReference,
   canGuestCancel,
   formatDate,
+  formatDateRange,
   resolveBookingCheckIn,
   resolveBookingCheckOut,
   statusClassName,
@@ -32,7 +36,7 @@ export default function GuestBookingDetailPage() {
   const router = useRouter();
   const bookingId = typeof router.query.id === "string" ? router.query.id : "";
 
-  const { loading, error, userId, bookings, listingById, hostById } = useGuestBookingsData();
+  const { loading, error, userId, bookings, listingById, hostById, refresh } = useGuestBookingsData();
 
   const [localStatus, setLocalStatus] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
@@ -40,6 +44,8 @@ export default function GuestBookingDetailPage() {
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "done" | "error">("idle");
+  const [flexBusy, setFlexBusy] = useState<false | "confirm" | "decline" | "extend" | "release">(false);
+  const [flexError, setFlexError] = useState<string | null>(null);
 
   const booking = useMemo(
     () => bookings.find((row) => row.id === bookingId) ?? null,
@@ -117,10 +123,90 @@ export default function GuestBookingDetailPage() {
     }
   }, [listing]);
 
+  const handleConfirmFlexNight = useCallback(async () => {
+    if (!booking?.id) return;
+    setFlexBusy("confirm");
+    setFlexError(null);
+    try {
+      const response = await fetch("/api/flex/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bookingId: booking.id }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Unable to confirm extra night.");
+      }
+      await refresh();
+    } catch (err: any) {
+      setFlexError(err?.message ?? "Unable to confirm extra night.");
+    } finally {
+      setFlexBusy(false);
+    }
+  }, [booking?.id, refresh]);
+
+  const handleDeclineFlexNight = useCallback(async () => {
+    if (!booking?.id) return;
+    setFlexBusy("release");
+    setFlexError(null);
+    try {
+      const response = await fetch("/api/flex/release", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bookingId: booking.id }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Unable to decline extra night.");
+      }
+      await refresh();
+    } catch (err: any) {
+      setFlexError(err?.message ?? "Unable to decline extra night.");
+    } finally {
+      setFlexBusy(false);
+    }
+  }, [booking?.id, refresh]);
+
+  const handleExtendRollingFlex = useCallback(async () => {
+    if (!booking?.id) return;
+    setFlexBusy("extend");
+    setFlexError(null);
+    try {
+      const response = await fetch("/api/flex/extend", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ bookingId: booking.id }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (payload?.code === "FLEX_PAYMENT_METHOD_MISSING") {
+          throw new Error(
+            "We couldn’t process your payment method. Update your payment details to extend your stay."
+          );
+        }
+        throw new Error(payload?.error ?? "Unable to extend stay.");
+      }
+      await refresh();
+    } catch (err: any) {
+      setFlexError(err?.message ?? "Unable to extend stay.");
+    } finally {
+      setFlexBusy(false);
+    }
+  }, [booking?.id, refresh]);
+
   const status = String(localStatus ?? booking?.status ?? "").toLowerCase();
   const checkIn = booking ? resolveBookingCheckIn(booking) : null;
   const checkOut = booking ? resolveBookingCheckOut(booking) : null;
   const nights = booking ? bookingNights(booking) : null;
+  const isSharedGroupBooking =
+    String(booking?.booking_type ?? "").toLowerCase() === "shared_group" ||
+    Boolean(listing?.is_shared_stay);
   const amountMajor = booking
     ? booking.guest_total_pence != null
       ? booking.guest_total_pence / 100
@@ -177,6 +263,33 @@ export default function GuestBookingDetailPage() {
 
             <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
               <div className="space-y-4">
+                {isSharedGroupBooking ? (
+                  <SharedBookingCard
+                    listingTitle={listing?.title ?? "Shared stay"}
+                    dateRangeLabel={formatDateRange(checkIn, checkOut)}
+                    perPersonWeeklyPricePence={
+                      listing?.shared_weekly_price_pence != null
+                        ? Math.round(
+                            Number(listing.shared_weekly_price_pence) /
+                              Math.max(1, Math.round(Number(listing?.shared_total_spots ?? 1)))
+                          )
+                        : null
+                    }
+                    amountPaidPence={
+                      booking?.guest_total_pence != null
+                        ? booking.guest_total_pence
+                        : booking?.price_total != null
+                        ? Math.round(Number(booking.price_total) * 100)
+                        : null
+                    }
+                    groupStatus={status}
+                    occupancy={{
+                      filled: null,
+                      total: listing?.shared_total_spots ?? null,
+                    }}
+                  />
+                ) : null}
+
                 <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <h2 className="text-sm font-semibold text-slate-900">Booking summary</h2>
                   <div className="mt-4 grid gap-3 text-sm text-slate-600">
@@ -278,6 +391,33 @@ export default function GuestBookingDetailPage() {
                     </div>
                   </div>
                 </Card>
+
+                {String(booking.flex_mode ?? "").toLowerCase() === "rolling" ? (
+                  <RollingFlexCard
+                    enabled
+                    status={booking.flex_status}
+                    confirmedEnd={booking.flex_current_confirmed_end ?? checkOut}
+                    maxEnd={booking.flex_max_end}
+                    cutoffAt={booking.flex_extension_cutoff_at}
+                    rollingWindowDays={booking.flex_rolling_window_days}
+                    busy={Boolean(flexBusy)}
+                    error={flexError}
+                    onExtend={handleExtendRollingFlex}
+                    onRelease={handleDeclineFlexNight}
+                  />
+                ) : (
+                  <FlexStayCard
+                    enabled={Boolean(booking.flex_extra_night)}
+                    status={booking.flex_extra_night_status}
+                    cutoffAt={booking.flex_extra_night_cutoff_at}
+                    checkoutAt={checkOut}
+                    pricePence={booking.flex_extra_night_price_pence}
+                    busy={Boolean(flexBusy)}
+                    error={flexError}
+                    onConfirm={handleConfirmFlexNight}
+                    onDecline={handleDeclineFlexNight}
+                  />
+                )}
 
                 <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <h2 className="text-sm font-semibold text-slate-900">Actions</h2>

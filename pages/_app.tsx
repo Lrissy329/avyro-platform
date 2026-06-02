@@ -27,7 +27,6 @@ export default function MyApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const hideGlobalHeader = Boolean((Component as any).hideGlobalHeader);
   const hideHeaderForRoute =
-    router.pathname.startsWith("/host") ||
     router.pathname.startsWith("/ops") ||
     router.pathname.startsWith("/admin");
   const showGlobalHeader = !hideGlobalHeader && !hideHeaderForRoute;

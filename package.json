@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "rm -rf .next && next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "smoke:rolling-flex": "node scripts/smoke-rolling-flex.mjs"
   },
   "dependencies": {
     "@daypilot/daypilot-lite-react": "^5.4.1",

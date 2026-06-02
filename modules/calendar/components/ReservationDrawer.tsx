@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { formatCurrency } from "@/lib/dateUtils";
 import type { ReservationRecord } from "@/modules/calendar/types";
+import { SharedCalendarBlock } from "@/components/shared-stay/SharedCalendarBlock";
 
 type ReservationDrawerProps = {
   open: boolean;
@@ -21,6 +22,17 @@ const formatDateTime = (value: string, withTime: boolean) => {
     ? { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }
     : { month: "short", day: "numeric", year: "numeric" };
   return new Intl.DateTimeFormat("en-GB", options).format(date);
+};
+
+const formatDateOnly = (value?: string | null) => {
+  if (!value) return "—";
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-GB", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
 };
 
 export function ReservationDrawer({
@@ -118,6 +130,51 @@ export function ReservationDrawer({
                   : "—"}
               </span>
             </div>
+            {reservation.flexExtraNight ? (
+              <div className="mt-2 flex items-center justify-between text-sm text-slate-900">
+                <span>Optional extra night</span>
+                <span className="font-semibold">
+                  {reservation.flexExtraNightPricePence != null
+                    ? formatCurrency(reservation.flexExtraNightPricePence / 100, reservation.currency ?? "GBP")
+                    : "Reserved"}
+                </span>
+              </div>
+            ) : null}
+          {reservation.flexMode === "rolling" ? (
+              <>
+                <div className="mt-2 flex items-center justify-between text-sm text-slate-900">
+                  <span>Confirmed through</span>
+                  <span className="font-semibold">
+                    {formatDateOnly(reservation.flexCurrentConfirmedEnd)}
+                  </span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-sm text-slate-900">
+                  <span>Max possible end</span>
+                  <span className="font-semibold">{formatDateOnly(reservation.flexMaxEnd)}</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-sm text-slate-900">
+                  <span>Next decision deadline</span>
+                  <span className="font-semibold">
+                    {reservation.flexExtensionCutoffAt
+                      ? formatDateTime(reservation.flexExtensionCutoffAt, true)
+                      : "—"}
+                  </span>
+                </div>
+              </>
+            ) : null}
+            {reservation.sharedGroupId ? (
+              <>
+                <div className="mt-3">
+                  <SharedCalendarBlock
+                    startDate={reservation.start}
+                    endDate={reservation.end}
+                    filledSpots={reservation.sharedFilledSpots ?? 0}
+                    pendingSpots={reservation.sharedPendingSpots ?? 0}
+                    totalSpots={reservation.sharedTotalSpots ?? 0}
+                  />
+                </div>
+              </>
+            ) : null}
           </div>
 
           {reservation.address ? <p className="mt-4 text-sm text-slate-600">{reservation.address}</p> : null}

@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { stripe } from "@/lib/stripe";
 import { createClient } from "@supabase/supabase-js";
+import { finalizeSharedGroupCheckout, isSharedGroupCheckoutSession } from "@/lib/sharedCheckout";
 
 export const config = {
   api: {
@@ -154,6 +155,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as any;
+        if (isSharedGroupCheckoutSession(session)) {
+          const sharedResult = await finalizeSharedGroupCheckout({
+            supabaseAdmin,
+            session,
+          });
+          if (sharedResult.error) {
+            console.error("[stripe-webhook] shared checkout finalization failed:", sharedResult);
+          }
+          break;
+        }
+
         const metadata = session?.metadata ?? {};
         const bookingId = metadata.booking_id ?? metadata.bookingId ?? null;
         const listingId = metadata.listingId ?? null;

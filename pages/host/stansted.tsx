@@ -102,7 +102,7 @@ export default function HostStanstedLanding() {
   return (
     <>
       <Head>
-        <title>Host near Stansted · Avyro</title>
+        <title>Host near Stansted · Veloro</title>
       </Head>
 
       <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -115,7 +115,7 @@ export default function HostStanstedLanding() {
         >
           <div className="mx-auto flex max-w-[1280px] items-center justify-between px-6 py-4">
             <div className="text-sm font-semibold tracking-[0.2em] uppercase text-slate-700">
-              Avyro · Stansted
+              Veloro · Stansted
             </div>
             <nav className="flex items-center gap-6 text-sm text-slate-600">
               <a href="#earnings" className="hover:text-slate-900">Earnings</a>
@@ -144,7 +144,7 @@ export default function HostStanstedLanding() {
                 Turn spare rooms into consistent crew income—calm, premium, and predictable.
               </h1>
               <p className="mt-5 text-lg text-slate-600">
-                Avyro helps hosts near STN earn more with clear pricing, instant booking, and crew-ready demand.
+                Veloro helps hosts near STN earn more with clear pricing, instant booking, and crew-ready demand.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-4">
                 <Link

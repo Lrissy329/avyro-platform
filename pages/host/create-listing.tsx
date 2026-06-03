@@ -87,7 +87,7 @@ const LISTING_MODEL_OPTIONS = [
   {
     value: "shared",
     label: "Shared stay",
-    description: "Weekly shared accommodation with individual booking and spot tracking",
+    description: "Professionals book individual spots in the property.",
     icon: Users,
     rentalType: "overnight_stay",
     bookingUnit: "nightly" as const,
@@ -1024,6 +1024,27 @@ export default function CreateListing() {
               {errors.stay_model && (
                 <p className="text-red-600 text-sm mt-1">{errors.stay_model}</p>
               )}
+              {formData.stay_model === "shared" ? (
+                <div className="mx-auto mt-6 max-w-3xl rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                      <Users className="h-4 w-4" aria-hidden="true" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-base font-semibold text-slate-900">How Shared Stay works</h3>
+                      <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                        <p>Guests book individual spots in your property.</p>
+                        <p>The first guest secures the stay by booking their spot.</p>
+                        <p>Other professionals can continue joining until all spots are filled.</p>
+                        <p>You stay in control of availability and pricing.</p>
+                      </div>
+                      <p className="mt-3 text-sm font-medium text-slate-800">
+                        Example: 4 professionals staying near STN for 3 weeks.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </section>
           )}
 
@@ -1519,86 +1540,105 @@ export default function CreateListing() {
                 <div className="rounded-2xl border border-gray-200 bg-white p-4">
                   <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-gray-500">Section A — Base pricing</h3>
                   {formData.is_shared_stay ? (
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
-                          Total weekly price for the property (GBP)
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={formData.shared_weekly_price_gbp}
-                          onChange={(event) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              shared_weekly_price_gbp: event.target.value,
-                            }))
-                          }
-                          className="border border-black p-3 rounded w-full"
-                          placeholder="e.g. 600"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
-                          Total spots
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={formData.shared_total_spots}
-                          onChange={(event) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              shared_total_spots: Number(event.target.value || 1),
-                            }))
-                          }
-                          className="border border-black p-3 rounded w-full"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
-                          Minimum weeks
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={formData.shared_min_weeks}
-                          onChange={(event) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              shared_min_weeks: Number(event.target.value || 1),
-                            }))
-                          }
-                          className="border border-black p-3 rounded w-full"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
-                          Maximum weeks
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={formData.shared_max_weeks}
-                          onChange={(event) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              shared_max_weeks: Number(event.target.value || 1),
-                            }))
-                          }
-                          className="border border-black p-3 rounded w-full"
-                        />
-                      </div>
+                    <div className="mt-4 space-y-4">
+                      <p className="text-sm leading-6 text-gray-600">
+                        Shared Stay pricing is based on the total weekly property price. Flexivo
+                        shows guests a per-person weekly price.
+                      </p>
 
-                      <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Guests will see</p>
-                        <p className="mt-1 text-lg font-semibold text-gray-900">
-                          {formatGBPFromPence(sharedPerPersonWeeklyPreviewPence)} per person / week
+                      <details className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+                          What happens if not all spots are filled?
+                        </summary>
+                        <p className="mt-3 text-sm leading-6 text-slate-600">
+                          The first guest secures the booking. Additional guests may continue joining the stay, but your booking is already confirmed.
                         </p>
+                      </details>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
+                            Total weekly price for the property (GBP)
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={formData.shared_weekly_price_gbp}
+                            onChange={(event) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                shared_weekly_price_gbp: event.target.value,
+                              }))
+                            }
+                            className="border border-black p-3 rounded w-full"
+                            placeholder="e.g. 600"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
+                            Total spots
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={formData.shared_total_spots}
+                            onChange={(event) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                shared_total_spots: Number(event.target.value || 1),
+                              }))
+                            }
+                            className="border border-black p-3 rounded w-full"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
+                            Minimum weeks
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={formData.shared_min_weeks}
+                            onChange={(event) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                shared_min_weeks: Number(event.target.value || 1),
+                              }))
+                            }
+                            className="border border-black p-3 rounded w-full"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 mb-2">
+                            Maximum weeks
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={formData.shared_max_weeks}
+                            onChange={(event) =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                shared_max_weeks: Number(event.target.value || 1),
+                              }))
+                            }
+                            className="border border-black p-3 rounded w-full"
+                          />
+                        </div>
+
+                        <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Guests will see</p>
+                          <p className="mt-1 text-lg font-semibold text-gray-900">
+                            {formatGBPFromPence(sharedPerPersonWeeklyPreviewPence)} per person / week
+                          </p>
+                          <p className="mt-2 text-xs text-gray-500">
+                            Professionals book individual spots in the property.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   ) : (

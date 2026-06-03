@@ -39,10 +39,13 @@ export default function HostDashboardPage() {
       title: string | null;
       booking_unit: "nightly" | "hourly" | null;
       price_per_night: number | null;
+      is_shared_stay: boolean | null;
+      created_at: string | null;
     }>
   >([]);
   const [listingsLoading, setListingsLoading] = useState(true);
   const [listingsError, setListingsError] = useState<string | null>(null);
+  const [showSharedStayGuide, setShowSharedStayGuide] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -67,7 +70,7 @@ export default function HostDashboardPage() {
 
         const { data, error } = await supabase
           .from("listings")
-          .select("id, title, booking_unit, price_per_night")
+          .select("id, title, booking_unit, price_per_night, is_shared_stay, created_at")
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(6);
@@ -93,6 +96,18 @@ export default function HostDashboardPage() {
       isMounted = false;
     };
   }, [router]);
+
+  const sharedListings = listings.filter((listing) => Boolean(listing.is_shared_stay));
+  const newestSharedListing = sharedListings[0] ?? null;
+  const newestSharedCreatedAt = newestSharedListing?.created_at
+    ? new Date(newestSharedListing.created_at).getTime()
+    : null;
+  const shouldShowSharedConfidenceCard =
+    !listingsLoading &&
+    (sharedListings.length === 0 ||
+      (sharedListings.length === 1 &&
+        newestSharedCreatedAt != null &&
+        Date.now() - newestSharedCreatedAt <= 14 * 24 * 60 * 60 * 1000));
 
   return (
     <HostShellLayout title="Hosting insights" activeNav="dashboard">
@@ -205,6 +220,50 @@ export default function HostDashboardPage() {
             </p>
           </Card>
         </div>
+
+        {shouldShowSharedConfidenceCard ? (
+          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-2xl">
+                <p className="text-sm font-semibold text-slate-900">Shared Stay for airport professionals</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Shared Stay helps professionals coordinate accommodation near airports. The first
+                  guest secures the stay, then other professionals can continue joining until the
+                  available spots are filled.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSharedStayGuide((current) => !current)}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+              >
+                {showSharedStayGuide ? "Hide Shared Stay guide" : "Learn how Shared Stay works"}
+              </button>
+            </div>
+
+            {showSharedStayGuide ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-900">How occupancy works</p>
+                  <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                    <p>Professionals book individual spots in the property.</p>
+                    <p>Joining an existing stay matters because it keeps demand concentrated in one live weekly stay.</p>
+                    <p>Once a shared stay begins, the property dates are reserved for that stay while more professionals continue joining.</p>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-900">Why hosts use it</p>
+                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                    <li>Longer weekly stays can reduce vacancy gaps.</li>
+                    <li>Pricing stays simple with one weekly property rate.</li>
+                    <li>Designed for crew, trainees, contractors, and airport professionals.</li>
+                    <li>Your stay is confirmed when the first guest secures the booking.</li>
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+          </Card>
+        ) : null}
 
         <div>
           <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

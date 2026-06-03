@@ -178,6 +178,7 @@ const normalizeTimeParam = (value: unknown): string => {
 const parseISODate = (value: string) => new Date(`${value}T00:00:00`);
 const minDateValue = (a: Date, b: Date) => (a.getTime() <= b.getTime() ? a : b);
 const DAY_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const INVALID_LISTING_IDS = new Set(["", "undefined", "null"]);
 const normalizeDayKeys = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   const deduped = new Set<string>();
@@ -187,6 +188,15 @@ const normalizeDayKeys = (value: unknown): string[] => {
     }
   });
   return Array.from(deduped).sort();
+};
+
+const isFullWeekDateRange = (checkIn: string, checkOut: string) => {
+  if (!checkIn || !checkOut || checkOut <= checkIn) return false;
+  const start = parseDateInputValue(checkIn);
+  const end = parseDateInputValue(checkOut);
+  if (!start || !end || end <= start) return false;
+  const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  return diffDays > 0 && diffDays % 7 === 0;
 };
 
 const STAY_TYPE_CONFIG: Record<
@@ -365,6 +375,11 @@ export default function BookingWidget({
       ? "extra_night"
       : "none";
   const didHydrateFromQueryRef = useRef(false);
+  const lastSharedParentRangeSkipRef = useRef<string | null>(null);
+  const hasValidListingId = useMemo(
+    () => typeof listingId === "string" && !INVALID_LISTING_IDS.has(listingId.trim()),
+    [listingId]
+  );
 
   const toUtcIso = (dateStr: string, timeStr: string) => {
     const [year, month, day] = dateStr.split("-").map(Number);
@@ -508,20 +523,34 @@ export default function BookingWidget({
     if (!nightlyRange) return;
     const nextCheckIn = nightlyRange.from ? toDateInputValue(nightlyRange.from) : "";
     const nextCheckOut = nightlyRange.to ? toDateInputValue(nightlyRange.to) : "";
+    if (isSharedStayListing && nextCheckIn && nextCheckOut) {
+      const incomingKey = `${nextCheckIn}:${nextCheckOut}`;
+      if (!isFullWeekDateRange(nextCheckIn, nextCheckOut)) {
+        lastSharedParentRangeSkipRef.current = incomingKey;
+        if (nextCheckIn !== checkInDate) {
+          setCheckInDate((prev) => (prev === nextCheckIn ? prev : nextCheckIn));
+        }
+        return;
+      }
+      if (lastSharedParentRangeSkipRef.current === incomingKey) {
+        lastSharedParentRangeSkipRef.current = null;
+      }
+    }
     if (nextCheckIn !== checkInDate) {
-      setCheckInDate(nextCheckIn);
+      setCheckInDate((prev) => (prev === nextCheckIn ? prev : nextCheckIn));
     }
     if (nextCheckOut !== checkOutDate) {
-      setCheckOutDate(nextCheckOut);
+      setCheckOutDate((prev) => (prev === nextCheckOut ? prev : nextCheckOut));
     }
-  }, [nightlyRange, isHourlyStay, checkInDate, checkOutDate]);
+  }, [nightlyRange, isHourlyStay, isSharedStayListing, checkInDate, checkOutDate]);
 
   useEffect(() => {
     if (isHourlyStay || isSharedStayListing) return;
     if (!checkInDate) return;
     if (onNightlyRangeChange && nightlyRange && !nightlyRange.to) return;
     if (!checkOutDate || checkOutDate <= checkInDate) {
-      setCheckOutDate(addDaysToDateInput(checkInDate, 1));
+      const nextCheckOut = addDaysToDateInput(checkInDate, 1);
+      setCheckOutDate((prev) => (prev === nextCheckOut ? prev : nextCheckOut));
     }
   }, [isHourlyStay, isSharedStayListing, checkInDate, checkOutDate, onNightlyRangeChange, nightlyRange]);
 
@@ -1375,7 +1404,7 @@ export default function BookingWidget({
     if (isSharedWeeksRangeValid) return;
     const derivedCheckOut = addDaysToDateInput(checkInDate, clampedSharedWeeks * 7);
     if (checkOutDate !== derivedCheckOut) {
-      setCheckOutDate(derivedCheckOut);
+      setCheckOutDate((prev) => (prev === derivedCheckOut ? prev : derivedCheckOut));
     }
   }, [
     checkInDate,
@@ -1414,9 +1443,11 @@ export default function BookingWidget({
 
   useEffect(() => {
     if (isHourlyStay || !showCalendar) return;
+    if (!hasValidListingId) return;
     const fetchAvailability = async () => {
       const from = toISODate(availabilityStart);
       const to = toISODate(availabilityEnd);
+      if (!from || !to || from >= to) return;
       const requestId = latestAvailabilityRequestIdRef.current + 1;
       latestAvailabilityRequestIdRef.current = requestId;
       setAvailabilityLoading(true);
@@ -1436,7 +1467,7 @@ export default function BookingWidget({
 
       try {
         const response = await fetch(
-          `/api/listings/${listingId}/availability?from=${from}&to=${to}`
+          `/api/listings/${encodeURIComponent(listingId)}/availability?from=${from}&to=${to}`
         );
         const payload = await response.json().catch(() => null);
         const booked = normalizeDayKeys(payload?.booked);
@@ -1570,7 +1601,7 @@ export default function BookingWidget({
       }
     };
     fetchAvailability();
-  }, [availabilityStart, availabilityEnd, listingId, isHourlyStay, showCalendar]);
+  }, [availabilityStart, availabilityEnd, hasValidListingId, listingId, isHourlyStay, showCalendar]);
 
   useEffect(() => {
     if (isHourlyStay) return;

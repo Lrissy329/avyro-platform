@@ -7,7 +7,6 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewLabel } from "@/lib/reviews";
 import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
-import { SharedStayBadge } from "@/components/shared-stay/SharedStayBadge";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 
@@ -128,32 +127,37 @@ const pickImage = (listing: MapListing): string => {
   return "/placeholder.jpg";
 };
 
-const buildTag = (listing: MapListing) => {
-  if (listing.quietForRest) return "Quiet for rest";
-  if (listing.blackoutBlinds) return "Blackout blinds";
-  if (listing.access24_7) return "24/7 access";
-  return "Crew-ready";
-};
-
-const buildSummary = (listing: MapListing, transportText: string | null) => {
+const buildSummary = (listing: MapListing) => {
+  const isSharedStay = Boolean(listing.isSharedStay ?? listing.isSharedBookingAllowed);
+  if (isSharedStay) {
+    const remaining =
+      toNumber(listing.sharedSpotsRemaining) ?? toNumber((listing as any).shared_spots_remaining);
+    if (remaining != null && remaining > 0) return "Join other professionals already staying nearby.";
+    return "Professional weekly stay near the airport.";
+  }
+  if (listing.booking_unit === "hourly") return "Short-stay room near the airport.";
   const raw = typeof listing.description === "string" ? listing.description.trim() : "";
-  if (raw) return raw;
-  const airport = listing.airportCode ? `near ${listing.airportCode}` : "near the airport";
-  const transport = transportText ? transportText.toLowerCase() : "fast transfer links";
-  return `Crew-ready stay ${airport} with ${transport}. Ideal for overnight rotations and reliable rest between shifts.`;
+  if (raw && raw.length <= 120) return raw;
+  return "Reliable base for training blocks and rotations.";
 };
 
 const buildTitle = (listing: MapListing) => {
+  if (typeof listing.title === "string" && listing.title.trim().length > 0) return listing.title;
   const bedCount = listing.beds ?? listing.bedrooms ?? null;
   const propertyType = normaliseType(listing.type);
+  if (Boolean(listing.isSharedStay ?? listing.isSharedBookingAllowed)) {
+    return listing.airportCode ? `Shared stay near ${listing.airportCode}` : "Shared stay near the airport";
+  }
   if (bedCount && propertyType) return `${bedCount} Bed ${propertyType}`;
-  return listing.title || propertyType || "Listing";
+  if (propertyType) return propertyType;
+  return listing.airportCode ? `Crew house near ${listing.airportCode}` : "Professional stay near the airport";
 };
 
 const buildFacts = (listing: MapListing) => {
   const parts = [
-    listing.bedrooms ? pluralize(listing.bedrooms, "Bedroom") : null,
-    listing.bathrooms ? pluralize(listing.bathrooms, "Bathroom") : null,
+    listing.beds ? pluralize(listing.beds, "bed") : null,
+    listing.bedrooms ? pluralize(listing.bedrooms, "bedroom") : null,
+    listing.bathrooms ? pluralize(listing.bathrooms, "bathroom") : null,
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
 };
@@ -196,25 +200,8 @@ const getTransportInfo = (listing: MapListing) => {
   return null;
 };
 
-const BusIcon = () => (
-  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-    <path
-      d="M6 4h12a2 2 0 0 1 2 2v9a3 3 0 0 1-3 3v1h-2v-1H9v1H7v-1a3 3 0 0 1-3-3V6a2 2 0 0 1 2-2zm1 3v4h10V7H7zm0 7a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm10 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"
-      fill="currentColor"
-    />
-  </svg>
-);
-
-const CarIcon = () => (
-  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-    <path
-      d="M5 11h14l-1.6-4.2A2 2 0 0 0 15.54 5H8.46A2 2 0 0 0 6.6 6.8L5 11zm1 7a1 1 0 0 1-1-1v-2h14v2a1 1 0 0 1-1 1h-1v1h-2v-1H9v1H7v-1H6z"
-      fill="currentColor"
-    />
-  </svg>
-);
-
 const WIDE_LAYOUT_MIN_WIDTH = 820;
+const DESKTOP_VIEWPORT_MIN_WIDTH = 1024;
 
 export default function MapListingCardV2({
   listing,
@@ -227,25 +214,49 @@ export default function MapListingCardV2({
 }: MapListingCardProps) {
   const cardRef = useRef<HTMLElement | null>(null);
   const [isWideLayout, setIsWideLayout] = useState(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
 
   useEffect(() => {
     const node = cardRef.current;
-    if (!node) return;
+
+    const mediaQuery =
+      typeof window !== "undefined"
+        ? window.matchMedia(`(min-width: ${DESKTOP_VIEWPORT_MIN_WIDTH}px)`)
+        : null;
 
     const updateLayout = () => {
-      setIsWideLayout(node.clientWidth >= WIDE_LAYOUT_MIN_WIDTH);
+      const nextDesktopViewport = Boolean(mediaQuery?.matches);
+      setIsDesktopViewport(nextDesktopViewport);
+      setIsWideLayout((node?.clientWidth ?? 0) >= WIDE_LAYOUT_MIN_WIDTH);
     };
 
     updateLayout();
 
-    if (typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver(() => updateLayout());
-      observer.observe(node);
-      return () => observer.disconnect();
+    if (typeof mediaQuery?.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateLayout);
+    } else if (typeof mediaQuery?.addListener === "function") {
+      mediaQuery.addListener(updateLayout);
     }
 
-    window.addEventListener("resize", updateLayout);
-    return () => window.removeEventListener("resize", updateLayout);
+    let observer: ResizeObserver | null = null;
+    if (node && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => updateLayout());
+      observer.observe(node);
+    } else if (typeof window !== "undefined") {
+      window.addEventListener("resize", updateLayout);
+    }
+
+    return () => {
+      observer?.disconnect();
+      if (typeof mediaQuery?.removeEventListener === "function") {
+        mediaQuery.removeEventListener("change", updateLayout);
+      } else if (typeof mediaQuery?.removeListener === "function") {
+        mediaQuery.removeListener(updateLayout);
+      }
+      if (!observer && typeof window !== "undefined") {
+        window.removeEventListener("resize", updateLayout);
+      }
+    };
   }, []);
 
   const bookingUnit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
@@ -299,13 +310,12 @@ export default function MapListingCardV2({
     : null;
   const showStayTotal = stayTotal != null;
 
-  const tag = buildTag(listing);
   const typeLabel = normaliseType(listing.type);
 
   const titleLine = buildTitle(listing);
   const factsLine = buildFacts(listing);
   const imageSrc = pickImage(listing);
-  const badgeText = isSharedStay ? "SHARED STAY" : "OVERNIGHT";
+  const badgeText = isSharedStay ? "Shared stay" : bookingUnit === "hourly" ? "Day-use" : "Overnight";
 
   const reviewOverall = toNumber(listing.review_overall ?? listing.reviewOverall);
   const reviewTotal = toNumber(listing.review_total ?? listing.reviewTotal);
@@ -313,31 +323,25 @@ export default function MapListingCardV2({
 
   const transportInfo = getTransportInfo(listing);
   const transportMinutes = transportInfo?.minutes;
-  const transportText = transportMinutes
-    ? `${transportInfo.mode} · ${transportMinutes} to ${listing.airportCode ?? "airport"}`
-    : null;
-  const summaryText = buildSummary(listing, transportText);
-  const sharedSummaryText = isSharedStay
-    ? "Join a weekly crew group and pay per person. Start a group if one is not open yet."
-    : null;
+  const summaryText = buildSummary(listing);
   const locationText = listing.coordsMissing
     ? listing.locationFallback ?? listing.location ?? ""
     : listing.location ?? listing.locationFallback ?? "";
   const showStayTotalDetails = showStayTotal && stayTotal != null;
-  const unitLine =
-    guestUnitPrice != null
-      ? isSharedStay
-        ? `${formatCurrency(guestUnitPrice)} per person / week`
-        : `${formatCurrency(guestUnitPrice)} avg per ${unitLabel}`
-      : null;
-  const keyTags = [listing.airportCode, typeLabel, isSharedStay ? "Shared stay" : tag].filter(
-    (value): value is string => Boolean(value)
-  );
-  const visibleTags = isWideLayout ? keyTags.slice(0, 3) : keyTags.slice(0, 2);
-  const sharedSpotsRemainingValue =
-    toNumber(listing.sharedSpotsRemaining) ??
-    toNumber((listing as any).shared_spots_remaining);
+  const metadataLine = [
+    transportMinutes ? `${transportMinutes} to ${listing.airportCode ?? "airport"}` : null,
+    typeLabel,
+    isSharedStay
+      ? listing.sharedTotalSpots
+        ? pluralize(Math.max(1, Math.round(Number(listing.sharedTotalSpots))), "spot")
+        : null
+      : factsLine,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" · ");
   const href = listingHref ?? (listing.id ? `/listing/${listing.id}` : "#");
+  const ctaLabel = isSharedStay ? "Join shared stay →" : "View stay →";
+  const useHorizontalLayout = isWideLayout || isDesktopViewport;
 
   const renderPrice = (compact = false) => {
     if (guestUnitPrice == null) {
@@ -346,10 +350,10 @@ export default function MapListingCardV2({
 
     const priceAmount = showStayTotalDetails && stayTotal != null ? stayTotal : guestUnitPrice;
     const valueClass = compact
-      ? "text-2xl font-semibold tracking-tight text-neutral-900"
-      : "text-3xl font-semibold tracking-tight text-neutral-900";
-    const detailClass = compact ? "text-xs text-neutral-600" : "text-sm text-neutral-600";
-    const footnoteClass = compact ? "mt-0.5 text-[11px] text-neutral-500" : "mt-1 text-xs text-neutral-500";
+      ? "text-[1.16rem] font-semibold tracking-tight text-neutral-900"
+      : "text-[1.45rem] font-semibold tracking-tight text-neutral-900";
+    const detailClass = compact ? "text-[11px] text-neutral-500" : "text-xs text-neutral-500";
+    const footnoteClass = compact ? "mt-1 text-[11px] text-neutral-400" : "mt-1 text-[11px] text-neutral-400";
 
     return (
       <>
@@ -360,24 +364,14 @@ export default function MapListingCardV2({
               for {resolvedUnits} {unitLabel}
               {resolvedUnits === 1 ? "" : "s"}
             </div>
-            {unitLine && <div className={detailClass}>{unitLine}</div>}
+            {isSharedStay ? <div className={detailClass}>per person / week</div> : null}
           </>
         ) : (
           <div className={detailClass}>
             {isSharedStay ? "per person / week" : `per ${unitLabel}`}
           </div>
         )}
-        <div className={footnoteClass}>
-          {isSharedStay
-            ? sharedSpotsRemainingValue != null
-              ? sharedSpotsRemainingValue <= 0
-                ? "Full"
-                : `${Math.max(0, Math.round(sharedSpotsRemainingValue))} spot${
-                    Math.max(0, Math.round(sharedSpotsRemainingValue)) === 1 ? "" : "s"
-                  } left`
-              : "Each guest books and pays individually"
-            : "includes taxes & fees"}
-        </div>
+        {!isSharedStay ? <div className={footnoteClass}>includes fees</div> : null}
       </>
     );
   };
@@ -391,19 +385,78 @@ export default function MapListingCardV2({
       onMouseLeave={onLeave}
       onClick={() => onSelect?.()}
     >
+      {!useHorizontalLayout ? (
+        <article
+          ref={cardRef}
+          className={`overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md ${
+            active ? "border-neutral-400 shadow-md" : ""
+          }`}
+        >
+          <div className="relative aspect-[4/3] w-full overflow-hidden bg-neutral-100">
+            <Image
+              src={imageSrc}
+              alt={listing.title ?? "Listing image"}
+              fill
+              className="object-cover"
+              sizes="100vw"
+            />
+            <span className="absolute left-4 top-4 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+              {badgeText}
+            </span>
+            {transportMinutes ? (
+              <span className="absolute bottom-4 left-4 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+                {transportMinutes} to {listing.airportCode ?? "airport"}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex flex-col gap-3 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <h3 className="line-clamp-2 text-[1.05rem] font-semibold leading-6 text-neutral-900">
+                  {titleLine}
+                </h3>
+                {metadataLine ? (
+                  <div className="mt-1 line-clamp-1 text-sm text-neutral-600">{metadataLine}</div>
+                ) : locationText ? (
+                  <div className="mt-1 line-clamp-1 text-sm text-neutral-600">{locationText}</div>
+                ) : null}
+              </div>
+              <div className="shrink-0 text-right">{renderPrice(true)}</div>
+            </div>
+
+            <p className="line-clamp-2 text-sm leading-5 text-neutral-700">{summaryText}</p>
+
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <div className="min-w-0 text-xs text-neutral-600">
+                {reviewOverall != null && reviewTotal != null && reviewTotal > 0 ? (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="font-semibold text-neutral-900">{reviewOverall.toFixed(1)}</span>
+                    <span>· {reviewLabel ?? "Rated stay"}</span>
+                    <span>({reviewTotal})</span>
+                  </span>
+                ) : locationText ? (
+                  <span className="line-clamp-1">{locationText}</span>
+                ) : null}
+              </div>
+              <span className="shrink-0 text-sm font-medium text-neutral-800">{ctaLabel}</span>
+            </div>
+          </div>
+        </article>
+      ) : (
       <article
         ref={cardRef}
         className={`grid items-stretch rounded-[24px] border border-neutral-200 bg-white shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md ${
           isWideLayout
-            ? "min-h-[210px] grid-cols-[180px_minmax(0,1fr)_120px] gap-4 p-4"
-            : "min-h-[190px] grid-cols-[150px_minmax(0,1fr)] gap-3 p-3"
+            ? "min-h-[182px] grid-cols-[166px_minmax(0,1fr)_118px] gap-4 p-3.5"
+            : "min-h-[162px] grid-cols-[152px_minmax(0,1fr)_118px] gap-3.5 p-3.5"
         } ${
           active ? "border-neutral-400 shadow-md" : ""
         }`}
       >
         <div
           className={`relative w-full overflow-hidden rounded-2xl bg-neutral-100 ${
-            isWideLayout ? "h-[178px]" : "h-full min-h-[164px]"
+            isWideLayout ? "h-[150px]" : "h-full min-h-[132px]"
           }`}
         >
           <Image
@@ -411,14 +464,16 @@ export default function MapListingCardV2({
             alt={listing.title ?? "Listing image"}
             fill
             className="object-cover"
-            sizes={isWideLayout ? "180px" : "150px"}
+            sizes={isWideLayout ? "164px" : "148px"}
           />
-          <span className="absolute bottom-3 left-3 rounded-full bg-black px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#FEDD02]">
+          <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
             {badgeText}
           </span>
-          <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-base text-neutral-700 shadow-sm">
-            ♡
-          </span>
+          {transportMinutes ? (
+            <span className="absolute bottom-3 left-3 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+              {transportMinutes} to {listing.airportCode ?? "airport"}
+            </span>
+          ) : null}
         </div>
 
         <div className={`flex h-full min-w-0 flex-col ${isWideLayout ? "gap-2.5" : "gap-2"}`}>
@@ -426,45 +481,23 @@ export default function MapListingCardV2({
             <div className="min-w-0">
               <h3
                 className={`line-clamp-2 font-semibold leading-tight text-neutral-900 ${
-                  isWideLayout ? "text-lg" : "text-base"
+                  isWideLayout ? "text-[1.04rem]" : "text-[1.01rem]"
                 }`}
               >
                 {titleLine}
               </h3>
-              {locationText && <div className="mt-1 line-clamp-1 text-sm text-neutral-600">{locationText}</div>}
+              <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-neutral-700">
+                {summaryText}
+              </p>
+              {metadataLine ? (
+                <div className="mt-2 line-clamp-1 text-[13px] text-neutral-600">{metadataLine}</div>
+              ) : locationText ? (
+                <div className="mt-2 line-clamp-1 text-[13px] text-neutral-600">{locationText}</div>
+              ) : null}
             </div>
-            {!isWideLayout ? <div className="shrink-0 text-right">{renderPrice(true)}</div> : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-600">
-            {visibleTags.map((tagLabel) => (
-              <span
-                key={tagLabel}
-                className="rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1"
-              >
-                {tagLabel}
-              </span>
-            ))}
-          </div>
-
-          <SharedStayBadge
-            isSharedStay={isSharedStay}
-            perPersonWeeklyPrice={sharedWeeklyPriceMajor}
-            spotsRemaining={listing.sharedSpotsRemaining ?? null}
-            totalSpots={listing.sharedTotalSpots ?? null}
-          />
-
-          <p className="line-clamp-2 text-sm leading-5 text-neutral-700">
-            {sharedSummaryText ?? summaryText}
-          </p>
-
-          <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-600">
-            {transportText && (
-              <span className="inline-flex items-center gap-1.5">
-                {transportInfo?.mode === "Public transport" ? <BusIcon /> : <CarIcon />}
-                {transportText}
-              </span>
-            )}
+          <div className="mt-auto flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-xs text-neutral-600">
             {reviewOverall != null && reviewTotal != null && reviewTotal > 0 && (
               <span className="inline-flex items-center gap-1">
                 <span className="font-semibold text-neutral-900">{reviewOverall.toFixed(1)}</span>
@@ -472,17 +505,16 @@ export default function MapListingCardV2({
                 <span>({reviewTotal})</span>
               </span>
             )}
-            {isWideLayout && factsLine ? <span>{factsLine}</span> : null}
+            <span className="text-sm font-medium text-neutral-800">{ctaLabel}</span>
           </div>
         </div>
 
-        {isWideLayout ? (
-          <div className="flex flex-col justify-end border-l border-neutral-100 pl-3 text-right">
-            {renderPrice(false)}
-          </div>
-        ) : null}
+        <div className="flex flex-col justify-start border-l border-neutral-100/80 pl-3 pt-1 text-right">
+          {renderPrice(useHorizontalLayout && !isWideLayout)}
+        </div>
 
       </article>
+      )}
     </Link>
   );
 }

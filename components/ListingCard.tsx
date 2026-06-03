@@ -6,7 +6,6 @@ import { Listing } from "@/types/Listing";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewSummaryLineFromScore } from "@/lib/reviews";
 import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
-import { SharedStayBadge } from "@/components/shared-stay/SharedStayBadge";
 
 const BUCKET = "listing-photos";
 const toPublicUrl = (pathOrUrl?: string | null): string | null => {
@@ -62,6 +61,10 @@ function toNumber(value: unknown): number | null {
 
 function normaliseType(value: unknown): string {
   if (typeof value !== "string" || value.length === 0) return "Type unknown";
+  const lower = value.replace(/_/g, " ").toLowerCase();
+  if (lower.includes("entire")) return "Entire place";
+  if (lower.includes("private")) return "Private room";
+  if (lower.includes("shared")) return "Private room";
   return value.replace(/_/g, " ");
 }
 
@@ -104,8 +107,12 @@ function pickImage(listing: ListingLike): string {
   return "/placeholder.jpg";
 }
 
+function pluralize(value: number, label: string) {
+  return `${value} ${label}${value === 1 ? "" : "s"}`;
+}
+
 export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }: Props) => {
-  const title = listing.title || (listing as any).name || "Untitled listing";
+  const rawTitle = listing.title || (listing as any).name || "";
   const location = shortLocation(listing.location || (listing as any).city || "");
   const locationLabel =
     listing.coordsMissing
@@ -153,14 +160,56 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
     listing.type ??
     listing.roomType ??
     (listing as any).type;
+  const typeLabel = normaliseType(typeValue);
   const imageSrc = pickImage(listing);
   const unitLabel = isSharedStay ? "week" : bookingUnit === "hourly" ? "hour" : "night";
   const modeLabel = isSharedStay ? "Shared stay" : bookingUnit === "hourly" ? "Day-use" : "Overnight";
-  const isEntirePlace =
-    typeValue && normaliseType(typeValue).toLowerCase().includes("entire");
-  const metaLine = [locationLabel, isEntirePlace ? "Entire place" : null]
+  const beds =
+    toNumber((listing as any).beds) ??
+    toNumber((listing as any).bedrooms) ??
+    null;
+  const travelMinutes =
+    toNumber((listing as any).driveMinutesToAirport) ??
+    toNumber((listing as any).travelMinutesMin) ??
+    null;
+  const airportCode =
+    typeof (listing as any).airportCode === "string"
+      ? (listing as any).airportCode
+      : null;
+  const travelLabel =
+    travelMinutes != null
+      ? `${Math.round(travelMinutes)} min to ${airportCode ?? "airport"}`
+      : null;
+  const metadataLine = [
+    travelLabel,
+    typeLabel !== "Type unknown" ? typeLabel : null,
+    isSharedStay
+      ? sharedTotalSpots != null
+        ? pluralize(Math.max(1, Math.round(sharedTotalSpots)), "spot")
+        : null
+      : beds != null
+      ? pluralize(Math.max(1, Math.round(beds)), "bed")
+      : null,
+  ]
     .filter(Boolean)
     .join(" · ");
+  const title =
+    rawTitle.trim().length > 0 && rawTitle !== "Untitled listing"
+      ? rawTitle
+      : isSharedStay
+      ? airportCode
+        ? `Shared stay near ${airportCode}`
+        : "Shared stay near the airport"
+      : airportCode
+      ? `Crew house near ${airportCode}`
+      : "Professional stay near the airport";
+  const summaryLine = isSharedStay
+    ? (sharedSpotsRemaining ?? 0) > 0
+      ? "Join other professionals already staying nearby."
+      : "Professional weekly stay near the airport."
+    : bookingUnit === "hourly"
+    ? "Short-stay room near the airport."
+    : "Reliable base for training blocks and rotations.";
 
   const listingId = (listing as any).id ?? "";
   const reviewOverall = toNumber(
@@ -187,6 +236,20 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
   const guestUnitPrice = stayPricing?.guest_unit_avg_major ?? null;
   const stayTotal = stayUnits > 0 ? stayPricing?.guest_total_major ?? null : null;
   const showStayTotal = stayTotal != null;
+  const priceValue = showStayTotal && stayTotal != null ? stayTotal : guestUnitPrice;
+  const priceDetail = isSharedStay
+    ? "per person / week"
+    : `per ${unitLabel}`;
+  const secondaryPriceLine = isSharedStay
+    ? sharedSpotsRemaining != null
+      ? sharedSpotsRemaining <= 0
+        ? "Full"
+        : `${Math.max(0, Math.round(sharedSpotsRemaining))} spot${
+            Math.max(0, Math.round(sharedSpotsRemaining)) === 1 ? "" : "s"
+          } left`
+      : "Weekly shared stay"
+    : "All fees included";
+  const ctaLabel = isSharedStay ? "Join shared stay →" : "View stay →";
 
   return (
     <Link
@@ -197,79 +260,65 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
       onMouseLeave={onLeave}
       onClick={() => onSelect?.()}
     >
-      <article className="flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white transition hover:shadow-md cursor-pointer">
-        <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-stretch">
-          <div className="relative aspect-[3/2] w-full overflow-hidden rounded-xl sm:h-[140px] sm:w-[200px] sm:shrink-0">
+      <article className="flex flex-col overflow-hidden rounded-[26px] border border-neutral-200 bg-white transition hover:shadow-md cursor-pointer">
+        <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-stretch sm:p-5">
+          <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl sm:h-[156px] sm:w-[224px] sm:shrink-0">
           <Image
             src={imageSrc}
             alt={title || "Listing image"}
             fill
             className="h-full w-full object-cover"
-            sizes="(max-width: 768px) 100vw, 220px"
+            sizes="(max-width: 768px) 100vw, 224px"
           />
           {modeLabel && (
-            <span className="absolute left-3 top-3 rounded-full bg-[#0B0D10] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+            <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
               {modeLabel}
             </span>
           )}
+          {travelLabel ? (
+            <span className="absolute bottom-3 left-3 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+              {travelLabel}
+            </span>
+          ) : null}
           </div>
-          <div className="flex flex-1 flex-col justify-between gap-3 sm:flex-row">
-            <div className="flex flex-1 flex-col gap-1">
-              <h3 className="line-clamp-2 text-base font-medium text-neutral-900 font-display">
+          <div className="flex flex-1 flex-col justify-between gap-4 sm:flex-row sm:gap-6">
+            <div className="flex flex-1 flex-col gap-2">
+              <h3 className="line-clamp-2 text-[1.02rem] font-medium leading-6 text-neutral-900 font-display">
                 {title}
               </h3>
-              {reviewLine ? (
-                <p className="line-clamp-1 text-xs text-[#4B5563] font-mono tabular-nums">
-                  {reviewLine}
-                </p>
+              <p className="line-clamp-2 text-sm leading-5 text-neutral-700">
+                {summaryLine}
+              </p>
+              {metadataLine ? (
+                <p className="line-clamp-1 text-sm text-[#4B5563]">{metadataLine}</p>
               ) : null}
-              {metaLine ? (
-                <p className="line-clamp-1 text-sm text-[#4B5563]">{metaLine}</p>
+              {locationLabel ? (
+                <p className="line-clamp-1 text-sm text-neutral-500">{locationLabel}</p>
               ) : null}
-              <SharedStayBadge
-                isSharedStay={isSharedStay}
-                perPersonWeeklyPrice={sharedWeeklyPriceMajor}
-                spotsRemaining={sharedSpotsRemaining}
-                totalSpots={sharedTotalSpots}
-                className="pt-1"
-              />
+              <div className="mt-auto flex items-center gap-3 pt-2">
+                {reviewLine ? (
+                  <p className="line-clamp-1 text-xs text-[#4B5563] font-mono tabular-nums">
+                    {reviewLine}
+                  </p>
+                ) : null}
+                <span className="text-sm font-medium text-neutral-800">{ctaLabel}</span>
+              </div>
             </div>
-            <div className="flex min-w-[140px] flex-col items-end justify-between text-right">
+            <div className="flex min-w-[152px] flex-col items-start justify-between text-left sm:items-end sm:text-right">
               <div className="mt-auto">
-                {showStayTotal && stayTotal != null ? (
+                {priceValue != null ? (
                   <>
-                    <div className="text-lg font-semibold text-neutral-900 font-mono tabular-nums">
-                      {formatCurrency(stayTotal)}
+                    <div className="text-[1.35rem] font-semibold text-neutral-900 font-mono tabular-nums">
+                      {formatCurrency(priceValue)}
                     </div>
-                    <div className="text-xs text-[#4B5563]">
-                      {isSharedStay
-                        ? `${stayUnits} nights, ${guestUnitPrice != null ? `${formatCurrency(guestUnitPrice)} / person / week` : "Shared rate"}`
-                        : `${stayUnits} ${stayUnits === 1 ? unitLabel : `${unitLabel}s`}, ${
-                            guestUnitPrice != null
-                              ? `avg ${formatCurrency(guestUnitPrice)} / ${unitLabel}`
-                              : "All fees included"
-                          }`}
-                    </div>
-                  </>
-                ) : guestUnitPrice != null ? (
-                  <>
-                    <div className="text-lg font-semibold text-neutral-900 font-mono tabular-nums">
-                      {isSharedStay
-                        ? `${formatCurrency(guestUnitPrice)} / person / week`
-                        : `${formatCurrency(guestUnitPrice)} / ${unitLabel}`}
-                    </div>
-                    <div className="text-xs text-[#4B5563]">
-                      {isSharedStay
-                        ? (() => {
-                            const remaining =
-                              toNumber((listing as any).sharedSpotsRemaining) ??
-                              toNumber((listing as any).shared_spots_remaining) ??
-                              null;
-                            if (remaining == null) return "Shared stay";
-                            if (remaining <= 0) return "Full";
-                            return `${remaining} spot${remaining === 1 ? "" : "s"} left`;
-                          })()
-                        : "All fees included"}
+                    <div className="text-xs text-[#4B5563]">{priceDetail}</div>
+                    {showStayTotal && stayTotal != null && !isSharedStay ? (
+                      <div className="text-xs text-neutral-500">
+                        {stayUnits} {stayUnits === 1 ? unitLabel : `${unitLabel}s`}
+                      </div>
+                    ) : null}
+                    <div className="pt-1 text-xs text-neutral-500">
+                      {secondaryPriceLine}
                     </div>
                   </>
                 ) : null}

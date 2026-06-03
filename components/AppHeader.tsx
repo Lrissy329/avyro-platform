@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 
+import SearchBar from "@/components/SearchBar";
 import { supabase } from "@/lib/supabaseClient";
 import {
   getHostingHomeHref,
@@ -158,6 +159,29 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
   const canGuest = hasGuestAccess(profile);
   const contextLabel = activeRole === "host" ? "Hosting" : "Travelling";
   const navItems = activeRole === "host" ? HOSTING_NAV : TRAVELLING_NAV;
+  const isResultsPage = router.pathname === "/search";
+  const headerSearchGuests = useMemo(() => {
+    const rawGuests = router.query.guests;
+    if (typeof rawGuests === "string" && rawGuests.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(rawGuests);
+        return {
+          adults: Number(parsed?.adults ?? 0),
+          children: Number(parsed?.children ?? 0),
+          infants: Number(parsed?.infants ?? 0),
+          pets: Number(parsed?.pets ?? 0),
+        };
+      } catch {
+        return undefined;
+      }
+    }
+    return {
+      adults: Number(router.query.adults || 0),
+      children: Number(router.query.children || 0),
+      infants: Number(router.query.infants || 0),
+      pets: Number(router.query.pets || 0),
+    };
+  }, [router.query]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -232,7 +256,7 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
       .join("") || "F";
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
+    <header className="sticky top-0 z-50 w-full border-b border-slate-200/70 bg-white/82 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-6 lg:px-8">
         <button
           type="button"
@@ -256,7 +280,42 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
           />
         </button>
 
-        <div className="hidden items-center gap-6 md:flex">
+        {isResultsPage ? (
+          <div className="hidden flex-1 justify-center lg:flex">
+            <div className="w-full max-w-[520px]">
+              <SearchBar
+                align="center"
+                variant="nav"
+                onSearch={() => undefined}
+                initialQuery={{
+                  location:
+                    typeof router.query.location === "string" ? router.query.location : undefined,
+                  checkIn:
+                    typeof router.query.checkIn === "string" ? router.query.checkIn : undefined,
+                  checkOut:
+                    typeof router.query.checkOut === "string" ? router.query.checkOut : undefined,
+                  checkInTime:
+                    typeof router.query.checkInTime === "string"
+                      ? router.query.checkInTime
+                      : undefined,
+                  checkOutTime:
+                    typeof router.query.checkOutTime === "string"
+                      ? router.query.checkOutTime
+                      : undefined,
+                  bookingUnit:
+                    router.query.bookingUnit === "hourly"
+                      ? "hourly"
+                      : router.query.bookingUnit === "nightly"
+                      ? "nightly"
+                      : undefined,
+                  guests: headerSearchGuests,
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        <div className={cx("hidden items-center gap-6 md:flex", isResultsPage && "lg:hidden")}>
           {navItems.map((item) => (
             <Link
               key={item.href}

@@ -785,6 +785,36 @@ html, body, #__next { height: 100%; }
   border-radius: 9999px;
 }
 
+.booking-datepicker--compact {
+  gap: 16px;
+}
+
+@media (min-width: 1024px) {
+  .booking-datepicker--compact {
+    min-width: 620px;
+  }
+}
+
+.booking-datepicker--compact .react-datepicker__header {
+  padding-bottom: 0;
+}
+
+.booking-datepicker--compact .react-datepicker__month-container {
+  padding: 0 4px 4px;
+}
+
+.booking-datepicker--compact .react-datepicker__day-name {
+  width: 34px;
+  line-height: 20px;
+  font-size: 0.68rem;
+}
+
+.booking-datepicker--compact .react-datepicker__day {
+  width: 34px;
+  line-height: 32px;
+  font-size: 0.82rem;
+}
+
 .availability-datepicker .react-datepicker__day--in-range,
 .availability-datepicker .react-datepicker__day--in-selecting-range {
   background-color: rgba(11, 13, 16, 0.06);

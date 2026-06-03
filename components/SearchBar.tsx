@@ -16,6 +16,7 @@ type Props = {
   onSearch: (filters: any) => void;
   initialQuery?: InitialQuery;
   align?: "left" | "center";
+  variant?: "default" | "compact" | "nav";
 };
 type Guests = { adults: number; children: number; infants: number; pets: number };
 type StayMode = "overnight" | "day_use";
@@ -45,7 +46,12 @@ const IconUsers = () => (
   </svg>
 );
 
-export default function SearchBar({ onSearch, initialQuery, align = "center" }: Props) {
+export default function SearchBar({
+  onSearch,
+  initialQuery,
+  align = "center",
+  variant = "default",
+}: Props) {
   const router = useRouter();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const lastOpenedRef = useRef<"where" | "dates" | "guests" | null>(null);
@@ -277,6 +283,29 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
     <span className="text-sm text-neutral-400">{text}</span>
   );
 
+  const compactLocationLabel = useMemo(() => {
+    const trimmed = whereQuery.trim();
+    if (!trimmed) return "Where";
+    const airportMatch = trimmed.match(/\(([A-Z]{3})\)/);
+    if (airportMatch?.[1]) return airportMatch[1];
+    const iataMatch = trimmed.match(/\b([A-Z]{3})\b/);
+    if (iataMatch?.[1]) return iataMatch[1];
+    const first = trimmed.split(",")[0]?.trim() || trimmed;
+    return first.length > 18 ? `${first.slice(0, 18)}…` : first;
+  }, [whereQuery]);
+
+  const compactDateLabel = useMemo(() => {
+    if (stayMode === "day_use") {
+      return dayUseDate ? `${checkInLabel}` : "Any day";
+    }
+    return dateTimeLabel === "Add dates" ? "Any week" : dateTimeLabel;
+  }, [stayMode, dayUseDate, checkInLabel, dateTimeLabel]);
+
+  const compactGuestLabel = useMemo(() => {
+    if (totalGuests <= 0) return "Guests";
+    return `${totalGuests} guest${totalGuests === 1 ? "" : "s"}`;
+  }, [totalGuests]);
+
   const renderCalendarHeader = (monthsShown: number) => {
     function CalendarHeader({
       monthDate,
@@ -338,7 +367,13 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
     >
       {/* Pill */}
       <div
-        className="flex items-center w-full max-w-5xl rounded-2xl border border-neutral-200 bg-white px-3 py-2 shadow-md hover:shadow-lg transition-shadow focus-within:ring-2 focus-within:ring-black/5"
+        className={`w-full max-w-5xl border border-neutral-200 bg-white transition-shadow focus-within:ring-2 focus-within:ring-black/5 ${
+          variant === "nav"
+            ? "flex items-center overflow-visible rounded-full px-1.5 py-1 shadow-sm hover:shadow-md"
+            : variant === "compact"
+            ? "flex items-center overflow-visible rounded-2xl px-2.5 py-2 shadow-sm hover:shadow-md lg:px-2 lg:py-1.5"
+            : "flex items-center rounded-2xl px-3 py-2 shadow-md hover:shadow-lg"
+        }`}
         role="search"
       >
         {/* WHERE */}
@@ -350,17 +385,37 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
            aria-expanded={showWhere}
            aria-controls={wherePopoverId}
            aria-label="Open location search"
-           className={`flex-[1.1] min-w-0 md:min-w-[220px] text-left px-4 py-3 min-h-[48px] focus:outline-none bg-transparent`}
+           className={`flex-[1.1] min-w-0 text-left focus:outline-none bg-transparent ${
+             variant === "nav"
+               ? "px-2.5 py-1.5 min-h-[40px]"
+               : variant === "compact"
+               ? "px-3 py-2.5 min-h-[44px] lg:px-2.5 lg:py-2"
+               : "px-4 py-3 min-h-[48px] md:min-w-[220px]"
+           }`}
          >
-          <div className="text-xs tracking-wider font-semibold uppercase text-neutral-500 mb-1">Where</div>
-          <div className="flex items-center gap-2">
-            <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center text-neutral-500"><IconPin /></span>
-            {whereQuery ? <span className="text-sm font-medium text-neutral-900 truncate">{whereQuery}</span> : chip("Search destinations")}
-          </div>
+          {variant === "nav" ? (
+            <div className="flex items-center gap-1.5">
+              <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center text-neutral-500"><IconPin /></span>
+              <span className="truncate text-[13px] font-medium text-neutral-900">{compactLocationLabel}</span>
+            </div>
+          ) : (
+            <>
+              <div className="text-xs tracking-wider font-semibold uppercase text-neutral-500 mb-1">Where</div>
+              <div className="flex items-center gap-2">
+                <span aria-hidden className="inline-flex h-4 w-4 items-center justify-center text-neutral-500"><IconPin /></span>
+                {whereQuery ? <span className="text-sm font-medium text-neutral-900 truncate">{whereQuery}</span> : chip("Search destinations")}
+              </div>
+            </>
+          )}
         </button>
 
         {/* Divider */}
-        <div className="hidden sm:block h-8 w-px bg-neutral-200/60" aria-hidden />
+        <div
+          className={`hidden sm:block w-px bg-neutral-200/70 ${
+            variant === "nav" ? "h-5" : variant === "compact" ? "h-7" : "h-8"
+          }`}
+          aria-hidden
+        />
 
         {/* DATE & TIME */}
         <button
@@ -371,23 +426,43 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
           aria-expanded={showDates}
           aria-controls={datesPopoverId}
           aria-label="Open date and time picker"
-          className={`hidden sm:block flex-[1.4] min-w-0 md:min-w-[240px] text-left px-5 py-3 min-h-[48px] focus:outline-none bg-transparent`}
+          className={`hidden sm:block flex-[1.4] min-w-0 text-left focus:outline-none bg-transparent ${
+            variant === "nav"
+              ? "px-2.5 py-1.5 min-h-[40px]"
+              : variant === "compact"
+              ? "px-3.5 py-2.5 min-h-[44px] lg:px-3 lg:py-2"
+              : "px-5 py-3 min-h-[48px] md:min-w-[240px]"
+          }`}
         >
-          <div className="text-xs tracking-wider font-semibold uppercase text-neutral-500 mb-1">
-            Date &amp; time
-          </div>
-          <div className="flex items-center gap-2">
-            <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center text-neutral-500"><IconCalendar /></span>
-            {dateTimeLabel === "Add dates" ? (
-              chip("Add dates")
-            ) : (
-              <span className="text-sm font-medium text-neutral-900 truncate">{dateTimeLabel}</span>
-            )}
-          </div>
+          {variant === "nav" ? (
+            <div className="flex items-center gap-1.5">
+              <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center text-neutral-500"><IconCalendar /></span>
+              <span className="truncate text-[13px] font-medium text-neutral-900">{compactDateLabel}</span>
+            </div>
+          ) : (
+            <>
+              <div className="text-xs tracking-wider font-semibold uppercase text-neutral-500 mb-1">
+                Date &amp; time
+              </div>
+              <div className="flex items-center gap-2">
+                <span aria-hidden className="inline-flex h-4 w-4 items-center justify-center text-neutral-500"><IconCalendar /></span>
+                {dateTimeLabel === "Add dates" ? (
+                  chip("Add dates")
+                ) : (
+                  <span className="text-sm font-medium text-neutral-900 truncate">{dateTimeLabel}</span>
+                )}
+              </div>
+            </>
+          )}
         </button>
 
         {/* Divider */}
-        <div className="hidden sm:block h-8 w-px bg-neutral-200/60" aria-hidden />
+        <div
+          className={`hidden sm:block w-px bg-neutral-200/70 ${
+            variant === "nav" ? "h-5" : variant === "compact" ? "h-7" : "h-8"
+          }`}
+          aria-hidden
+        />
 
         {/* GUESTS */}
         <button
@@ -398,38 +473,81 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
           aria-expanded={showGuests}
           aria-controls={guestsPopoverId}
           aria-label="Open guests selector"
-          className={`flex-[0.9] min-w-0 md:min-w-[160px] text-left px-5 py-3 min-h-[48px] focus:outline-none bg-transparent`}
+          className={`flex-[0.9] min-w-0 text-left focus:outline-none bg-transparent ${
+            variant === "nav"
+              ? "px-2.5 py-1.5 min-h-[40px]"
+              : variant === "compact"
+              ? "px-3.5 py-2.5 min-h-[44px] lg:px-3 lg:py-2"
+              : "px-5 py-3 min-h-[48px] md:min-w-[160px]"
+          }`}
         >
-          <div className="text-xs tracking-wider font-semibold uppercase text-neutral-500 mb-1">Who</div>
-          <div className="flex items-center gap-2">
-            <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center text-neutral-500"><IconUsers /></span>
-            {totalGuests > 0 ? <span className="text-sm font-medium text-neutral-900 truncate">{`${totalGuests} guests`}</span> : chip("Add guests")}
-          </div>
+          {variant === "nav" ? (
+            <div className="flex items-center gap-1.5">
+              <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center text-neutral-500"><IconUsers /></span>
+              <span className="truncate text-[13px] font-medium text-neutral-900">{compactGuestLabel}</span>
+            </div>
+          ) : (
+            <>
+              <div className="text-xs tracking-wider font-semibold uppercase text-neutral-500 mb-1">Who</div>
+              <div className="flex items-center gap-2">
+                <span aria-hidden className="inline-flex h-4 w-4 items-center justify-center text-neutral-500"><IconUsers /></span>
+                {totalGuests > 0 ? <span className="text-sm font-medium text-neutral-900 truncate">{`${totalGuests} guests`}</span> : chip("Add guests")}
+              </div>
+            </>
+          )}
         </button>
 
         {/* Divider before search */}
-        <div className="hidden sm:block h-8 w-px bg-neutral-200/60 mx-1" aria-hidden />
+        <div
+          className={`hidden sm:block w-px bg-neutral-200/70 ${
+            variant === "nav"
+              ? "mx-0.5 h-5"
+              : variant === "compact"
+              ? "mx-0.5 h-7"
+              : "mx-1 h-8"
+          }`}
+          aria-hidden
+        />
 
         {/* SEARCH BUTTON */}
         <button
           type="button"
           onClick={handleSearch}
-          className="ml-2 inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#FEDD02] px-4 text-sm font-semibold text-black shadow-md hover:bg-[#E6C902] active:bg-[#C9B002] hover:shadow-lg active:scale-[0.98] transition focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40"
+          className={`inline-flex shrink-0 items-center justify-center gap-2 bg-[#FEDD02] text-sm font-semibold text-black active:scale-[0.98] transition focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40 ${
+            variant === "nav"
+              ? "ml-0.5 h-9 min-w-[40px] rounded-full px-2.5 shadow-sm hover:bg-[#E6C902] active:bg-[#C9B002] hover:shadow-md"
+              : variant === "compact"
+              ? "ml-1 min-w-[92px] h-10 rounded-xl px-3 shadow-sm hover:bg-[#E6C902] active:bg-[#C9B002] hover:shadow-md"
+              : "ml-2 h-11 rounded-xl px-4 shadow-md hover:bg-[#E6C902] active:bg-[#C9B002] hover:shadow-lg"
+          }`}
           aria-label="Search"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width={variant === "nav" ? "16" : "18"} height={variant === "nav" ? "16" : "18"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <span>Search</span>
+          {variant === "nav" ? <span className="hidden xl:inline text-[13px]">Search</span> : <span>Search</span>}
         </button>
       </div>
 
       {/* WHERE POPOVER */}
       {showWhere && (
-        <div className="absolute top-full left-0 right-0 mt-3 z-30 flex justify-start">
-          <div id={wherePopoverId} role="dialog" aria-label="Choose a location" className="w-full max-w-xl rounded-2xl border border-neutral-200 bg-white p-4 shadow-2xl">
-            <div className="px-2 pb-3">
+        <div
+          className={`absolute top-full z-30 flex ${
+            variant === "nav" ? "left-0 mt-2 justify-start" : "left-0 right-0 mt-3 justify-start"
+          }`}
+        >
+          <div
+            id={wherePopoverId}
+            role="dialog"
+            aria-label="Choose a location"
+            className={`border border-neutral-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur-sm ${
+              variant === "nav"
+                ? "w-[460px] max-w-[calc(100vw-2rem)] rounded-2xl p-3"
+                : "w-full max-w-xl rounded-2xl p-4 shadow-2xl"
+            }`}
+          >
+            <div className={variant === "nav" ? "px-1 pb-2" : "px-2 pb-3"}>
               <input
                 ref={whereInputRef}
                 id="where-input"
@@ -437,17 +555,23 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
                 onChange={(e) => setWhereQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
                 placeholder="Search airports (LHR, LGW, STN, LTN) or destinations"
-                className="w-full rounded-full border border-neutral-300 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#FEDD02]/60"
+                className={`w-full rounded-full border border-neutral-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#FEDD02]/60 ${
+                  variant === "nav" ? "px-3.5 py-2.5" : "px-4 py-3"
+                }`}
                 role="combobox" aria-expanded={true} aria-autocomplete="list" aria-controls={whereListboxId}
               />
             </div>
-            <div className="mb-2 px-2 text-xs font-semibold text-neutral-500">Suggested destinations</div>
-            <ul id={whereListboxId} role="listbox" className="max-h-80 overflow-auto">
+            <div className={`text-xs font-semibold text-neutral-500 ${variant === "nav" ? "mb-1.5 px-1" : "mb-2 px-2"}`}>Suggested destinations</div>
+            <ul id={whereListboxId} role="listbox" className={variant === "nav" ? "max-h-72 overflow-auto" : "max-h-80 overflow-auto"}>
               {suggestions.filter(s => (whereQuery ? s.title.toLowerCase().includes(whereQuery.toLowerCase()) : true)).map(s => (
                 <li key={s.title} role="option" aria-selected={false}>
-                  <button type="button" className="w-full rounded-xl px-3 py-3 hover:bg-neutral-50 flex items-center gap-3"
+                  <button
+                    type="button"
+                    className={`w-full rounded-xl hover:bg-neutral-50 flex items-center ${
+                      variant === "nav" ? "gap-2.5 px-2 py-2.5" : "gap-3 px-3 py-3"
+                    }`}
                           onClick={() => { setWhereQuery(s.title); setShowWhere(false); whereButtonRef.current?.focus(); }}>
-                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-lg">{s.emoji}</span>
+                    <span className={`flex items-center justify-center rounded-lg bg-slate-100 ${variant === "nav" ? "h-9 w-9 text-base" : "h-10 w-10 text-lg"}`}>{s.emoji}</span>
                     <span className="text-left">
                       <div className="text-sm font-medium text-neutral-900">{s.title}</div>
                       <div className="text-xs text-neutral-500">{s.subtitle}</div>
@@ -462,14 +586,29 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
 
       {/* DATES POPOVER */}
       {showDates && (
-        <div className="absolute top-full left-1/2 mt-3 z-30 w-full max-w-3xl -translate-x-1/2">
-          <div id={datesPopoverId} role="dialog" aria-label="Choose dates" className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-2xl">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-4">
-              <div className="flex items-center gap-2">
+        <div
+          className={`absolute top-full z-30 ${
+            variant === "nav"
+              ? "left-1/2 mt-2 w-[760px] max-w-[calc(100vw-2rem)] -translate-x-1/2"
+              : "left-1/2 mt-3 w-full max-w-3xl -translate-x-1/2"
+          }`}
+        >
+          <div
+            id={datesPopoverId}
+            role="dialog"
+            aria-label="Choose dates"
+            className={`rounded-2xl border border-neutral-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur-sm ${
+              variant === "nav" ? "p-3" : "p-4 shadow-2xl"
+            }`}
+          >
+            <div className={`flex flex-wrap items-center justify-between gap-2 ${variant === "nav" ? "px-1 pb-3" : "px-2 pb-4"}`}>
+              <div className={`flex items-center ${variant === "nav" ? "gap-1.5" : "gap-2"}`}>
                 <button
                   type="button"
                   onClick={() => handleStayModeChange("overnight")}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                  className={`rounded-full border text-xs font-semibold ${
+                    variant === "nav" ? "px-2.5 py-1" : "px-3 py-1"
+                  } ${
                     stayMode === "overnight"
                       ? "border-[#FEDD02] bg-[#FEDD02] text-black"
                       : "border-neutral-300 text-neutral-700 hover:border-neutral-500"
@@ -480,7 +619,9 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
                 <button
                   type="button"
                   onClick={() => handleStayModeChange("day_use")}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                  className={`rounded-full border text-xs font-semibold ${
+                    variant === "nav" ? "px-2.5 py-1" : "px-3 py-1"
+                  } ${
                     stayMode === "day_use"
                       ? "border-[#FEDD02] bg-[#FEDD02] text-black"
                       : "border-neutral-300 text-neutral-700 hover:border-neutral-500"
@@ -489,16 +630,23 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
                   Day-use
                 </button>
               </div>
-              <div className="text-xs text-neutral-500">
+              <div className={`text-neutral-500 ${variant === "nav" ? "text-[11px]" : "text-xs"}`}>
                 {stayMode === "day_use" ? "Same-day stays with a time window." : "Standard overnight stays."}
               </div>
             </div>
 
             {stayMode === "overnight" ? (
               <>
-                <div className="flex items-center gap-2 px-2 pb-2" aria-hidden>
+                <div className={`flex items-center flex-wrap ${variant === "nav" ? "gap-1.5 px-1 pb-2" : "gap-2 px-2 pb-2"}`} aria-hidden>
                   {["Exact dates", "± 1 day", "± 2 days", "± 3 days", "± 7 days", "± 14 days"].map(label => (
-                    <span key={label} className="text-xs px-3 py-1 rounded-full border border-neutral-300 text-neutral-600">{label}</span>
+                    <span
+                      key={label}
+                      className={`rounded-full border border-neutral-300 text-neutral-600 ${
+                        variant === "nav" ? "px-2.5 py-0.5 text-[11px]" : "px-3 py-1 text-xs"
+                      }`}
+                    >
+                      {label}
+                    </span>
                   ))}
                 </div>
                 <div className="booking-datepicker-wrapper">
@@ -516,24 +664,24 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
                     }}
                     monthsShown={calendarMonths}
                     calendarStartDay={1}
-                    calendarClassName="booking-datepicker"
+                    calendarClassName={variant === "nav" ? "booking-datepicker booking-datepicker--compact" : "booking-datepicker"}
                     renderCustomHeader={renderCalendarHeader(calendarMonths)}
                   />
                 </div>
               </>
             ) : (
-              <div className="grid gap-4 px-2">
+              <div className={`grid ${variant === "nav" ? "gap-3 px-1" : "gap-4 px-2"}`}>
                 <DatePicker
                   inline
                   selected={dayUseDate ?? null}
                   onChange={(date) => setDayUseDate(date ?? undefined)}
                   monthsShown={1}
                   calendarStartDay={1}
-                  calendarClassName="booking-datepicker"
+                  calendarClassName={variant === "nav" ? "booking-datepicker booking-datepicker--compact" : "booking-datepicker"}
                   renderCustomHeader={renderCalendarHeader(1)}
                 />
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="text-sm text-neutral-700">
+                <div className={`grid sm:grid-cols-2 ${variant === "nav" ? "gap-2.5" : "gap-3"}`}>
+                  <label className={`${variant === "nav" ? "text-[13px]" : "text-sm"} text-neutral-700`}>
                     Start time
                     <input
                       type="time"
@@ -545,16 +693,16 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
                           setDayUseEndTime(addHoursToTime(next, 6));
                         }
                       }}
-                      className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                      className={`mt-1 w-full rounded-lg border border-neutral-300 ${variant === "nav" ? "px-3 py-2 text-[13px]" : "px-3 py-2 text-sm"}`}
                     />
                   </label>
-                  <label className="text-sm text-neutral-700">
+                  <label className={`${variant === "nav" ? "text-[13px]" : "text-sm"} text-neutral-700`}>
                     End time
                     <input
                       type="time"
                       value={dayUseEndTime}
                       onChange={(e) => setDayUseEndTime(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                      className={`mt-1 w-full rounded-lg border border-neutral-300 ${variant === "nav" ? "px-3 py-2 text-[13px]" : "px-3 py-2 text-sm"}`}
                     />
                   </label>
                 </div>
@@ -566,32 +714,43 @@ export default function SearchBar({ onSearch, initialQuery, align = "center" }: 
 
       {/* GUESTS POPOVER */}
       {showGuests && (
-        <div className="absolute top-full right-0 mt-3 z-30 w-full max-w-lg">
-          <div id={guestsPopoverId} role="dialog" aria-label="Choose guests" className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-2xl">
+        <div
+          className={`absolute top-full right-0 z-30 ${
+            variant === "nav" ? "mt-2 w-[360px] max-w-[calc(100vw-2rem)]" : "mt-3 w-full max-w-lg"
+          }`}
+        >
+          <div
+            id={guestsPopoverId}
+            role="dialog"
+            aria-label="Choose guests"
+            className={`rounded-2xl border border-neutral-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur-sm ${
+              variant === "nav" ? "p-3" : "p-4 shadow-2xl"
+            }`}
+          >
             {[
               { key: "adults", label: "Adults", sub: "Ages 13 or above" },
               { key: "children", label: "Children", sub: "Ages 2–12" },
               { key: "infants", label: "Infants", sub: "Under 2" },
               { key: "pets", label: "Pets", sub: "" },
             ].map(row => (
-              <div key={row.key} className="flex items-center justify-between py-3 border-b last:border-0">
+              <div key={row.key} className={`flex items-center justify-between border-b last:border-0 ${variant === "nav" ? "py-2.5" : "py-3"}`}>
                 <div>
-                  <div className="text-sm font-medium text-neutral-900">{row.label}</div>
-                  {row.sub && <div className="text-xs text-neutral-500">{row.sub}</div>}
+                  <div className={`${variant === "nav" ? "text-[13px]" : "text-sm"} font-medium text-neutral-900`}>{row.label}</div>
+                  {row.sub && <div className={`${variant === "nav" ? "text-[11px]" : "text-xs"} text-neutral-500`}>{row.sub}</div>}
                 </div>
-                <div className="flex items-center gap-3">
-                  <button type="button" className="h-8 w-8 rounded-full border border-neutral-300 flex items-center justify-center disabled:opacity-40 hover:bg-neutral-50"
+                <div className={`flex items-center ${variant === "nav" ? "gap-2.5" : "gap-3"}`}>
+                  <button type="button" className={`${variant === "nav" ? "h-7 w-7 text-sm" : "h-8 w-8"} rounded-full border border-neutral-300 flex items-center justify-center disabled:opacity-40 hover:bg-neutral-50`}
                           aria-label={`Decrease ${row.label.toLowerCase()}`} disabled={(guests as any)[row.key] <= 0}
                           onClick={() => setGuests(g => ({ ...g, [row.key]: Math.max(0, (g as any)[row.key] - 1) }))}>–</button>
-                  <span className="w-4 text-center text-sm" aria-live="polite">{(guests as any)[row.key]}</span>
-                  <button type="button" className="h-8 w-8 rounded-full border border-neutral-300 flex items-center justify-center hover:bg-neutral-50"
+                  <span className={`w-4 text-center ${variant === "nav" ? "text-[13px]" : "text-sm"}`} aria-live="polite">{(guests as any)[row.key]}</span>
+                  <button type="button" className={`${variant === "nav" ? "h-7 w-7 text-sm" : "h-8 w-8"} rounded-full border border-neutral-300 flex items-center justify-center hover:bg-neutral-50`}
                           aria-label={`Increase ${row.label.toLowerCase()}`}
                           onClick={() => setGuests(g => ({ ...g, [row.key]: (g as any)[row.key] + 1 }))}>+</button>
                 </div>
               </div>
             ))}
-            <div className="pt-3 text-right">
-              <button type="button" className="px-4 py-2 rounded-lg bg-neutral-900 text-white text-sm" onClick={() => setShowGuests(false)}>
+            <div className={`${variant === "nav" ? "pt-2 text-right" : "pt-3 text-right"}`}>
+              <button type="button" className={`${variant === "nav" ? "px-3.5 py-2 text-[13px]" : "px-4 py-2 text-sm"} rounded-lg bg-neutral-900 text-white`} onClick={() => setShowGuests(false)}>
                 Done
               </button>
             </div>

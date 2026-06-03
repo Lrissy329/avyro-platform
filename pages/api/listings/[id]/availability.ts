@@ -24,7 +24,7 @@ type AvailabilityResponse = {
   generated_at: string;
 };
 
-const MAX_RANGE_DAYS = 120;
+const MAX_RANGE_DAYS = 180;
 const isMissingRelation = (error: any) => {
   const code = String(error?.code ?? "");
   const message = String(error?.message ?? "").toLowerCase();
@@ -104,13 +104,12 @@ export default async function handler(
   }
 
   const diffDays = Math.ceil((windowEnd.getTime() - windowStart.getTime()) / 86400000);
-  if (diffDays > MAX_RANGE_DAYS) {
-    return res.status(400).json({ error: "Date window too large." });
-  }
+  const effectiveWindowEnd =
+    diffDays > MAX_RANGE_DAYS ? addDaysUtc(windowStart, MAX_RANGE_DAYS) : windowEnd;
 
   try {
     const normalizedFrom = toUtcDateOnlyString(windowStart);
-    const normalizedTo = toUtcDateOnlyString(windowEnd);
+    const normalizedTo = toUtcDateOnlyString(effectiveWindowEnd);
     if (ENABLE_AVAILABILITY_DEBUG) {
       console.log(
         "LISTING_AVAILABILITY_REQUEST\n" +
@@ -163,7 +162,7 @@ export default async function handler(
       supabase,
       listingId: id,
       windowStartDate: windowStart,
-      windowEndDateExclusive: windowEnd,
+      windowEndDateExclusive: effectiveWindowEnd,
       ignoreSharedGroupBookings: isSharedStayListing,
     });
 
@@ -270,11 +269,11 @@ export default async function handler(
           );
         }
         if (isClosed || isFull) {
-          markRangeDays(start, end, blocked, windowStart, windowEnd, booked);
+          markRangeDays(start, end, blocked, windowStart, effectiveWindowEnd, booked);
           return;
         }
         if (hasConfirmedOccupancy) {
-          markRangeDays(start, end, sharedOccupied, windowStart, windowEnd, booked);
+          markRangeDays(start, end, sharedOccupied, windowStart, effectiveWindowEnd, booked);
         }
       });
 

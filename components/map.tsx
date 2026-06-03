@@ -87,6 +87,21 @@ function isValidLng(lng: number | null): lng is number {
   return typeof lng === "number" && Number.isFinite(lng) && lng >= -180 && lng <= 180;
 }
 
+function haversineKm(a: [number, number], b: [number, number]): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(b[1] - a[1]);
+  const dLng = toRad(b[0] - a[0]);
+  const lat1 = toRad(a[1]);
+  const lat2 = toRad(b[1]);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+  return 2 * earthRadiusKm * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 function resolveCoords(pin: ListingPin): [number, number] | null {
   if (Array.isArray(pin.coords) && pin.coords.length >= 2) {
     const lng = toNumber(pin.coords[0]);
@@ -126,14 +141,14 @@ function MarkerDot({
 }) {
   const base =
     theme === "uber"
-      ? "relative inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold shadow-[0_8px_20px_rgba(11,13,16,0.24)] transition-transform duration-150 bg-white text-[#0B0D10] border-white"
+      ? "relative inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold shadow-[0_10px_24px_rgba(11,13,16,0.26)] transition-transform duration-150 bg-white text-[#0B0D10] border-white"
       : "relative inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm transition-transform duration-150 bg-[#FEDD02] text-black border-[#FEDD02]";
   const stateClass =
     theme === "uber"
       ? active
-        ? "scale-105 bg-[#0B0D10] text-white border-[#0B0D10]"
+        ? "scale-105 bg-[#0B0D10] text-white border-[#0B0D10] shadow-[0_12px_28px_rgba(11,13,16,0.34)]"
         : hovered
-        ? "scale-[1.04]"
+        ? "scale-[1.04] shadow-[0_12px_26px_rgba(11,13,16,0.3)]"
         : ""
       : active
       ? "scale-105 ring-1 ring-black/30"
@@ -354,28 +369,71 @@ export default function AeronoocMap({
     if (fitKey === lastFitRef.current) return;
     lastFitRef.current = fitKey;
 
-    if (markerPins.length > 1) {
-      const lngs = markerPins.map((p) => p.longitude);
-      const lats = markerPins.map((p) => p.latitude);
+    const framingPins =
+      airportCoords != null
+        ? markerPins.filter((pin) => haversineKm([pin.longitude, pin.latitude], airportCoords) <= 80)
+        : markerPins;
+    const pinsForBounds = framingPins.length > 0 ? framingPins : markerPins;
+    const framePoints = airportCoords
+      ? [...pinsForBounds.map((pin) => [pin.longitude, pin.latitude] as [number, number]), airportCoords]
+      : pinsForBounds.map((pin) => [pin.longitude, pin.latitude] as [number, number]);
+
+    if (framePoints.length > 1) {
+      const lngs = framePoints.map((point) => point[0]);
+      const lats = framePoints.map((point) => point[1]);
+      const lngSpan = Math.max(...lngs) - Math.min(...lngs);
+      const latSpan = Math.max(...lats) - Math.min(...lats);
+
+      if (airportCoords && (lngSpan > 2.4 || latSpan > 1.8)) {
+        map.flyTo({
+          center: airportCoords,
+          zoom: 9.8,
+          essential: true,
+        });
+        return;
+      }
+
       const bounds: [[number, number], [number, number]] = [
         [Math.min(...lngs), Math.min(...lats)],
         [Math.max(...lngs), Math.max(...lats)],
       ];
-      map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 500 });
+      map.fitBounds(bounds, {
+        padding: { top: 72, right: 84, bottom: 72, left: 84 },
+        maxZoom: airportCoords ? 12.6 : 13.4,
+        duration: 500,
+      });
       return;
     }
 
     if (markerPins.length === 1) {
+      if (airportCoords) {
+        const singleBounds: [[number, number], [number, number]] = [
+          [
+            Math.min(markerPins[0].longitude, airportCoords[0]),
+            Math.min(markerPins[0].latitude, airportCoords[1]),
+          ],
+          [
+            Math.max(markerPins[0].longitude, airportCoords[0]),
+            Math.max(markerPins[0].latitude, airportCoords[1]),
+          ],
+        ];
+        map.fitBounds(singleBounds, {
+          padding: { top: 72, right: 84, bottom: 72, left: 84 },
+          maxZoom: 12.8,
+          duration: 500,
+        });
+        return;
+      }
       map.flyTo({
         center: [markerPins[0].longitude, markerPins[0].latitude],
-        zoom: 13,
+        zoom: 12.8,
         essential: true,
       });
       return;
     }
 
     if (airportCoords) {
-      map.flyTo({ center: airportCoords, zoom: 11.5, essential: true });
+      map.flyTo({ center: airportCoords, zoom: 10.2, essential: true });
     }
   }, [airportCoords, fitToPins, mapReady, markerPins]);
 
@@ -444,7 +502,7 @@ export default function AeronoocMap({
         <div
           className={
             theme === "uber"
-              ? "pointer-events-none absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 text-xs font-semibold text-neutral-900 shadow border border-neutral-200"
+              ? "pointer-events-none absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-full bg-white/92 px-3 py-1.5 text-xs font-semibold text-neutral-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)] border border-neutral-200/80 backdrop-blur-sm"
               : "pointer-events-none absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-full bg-white/95 px-3.5 py-2 text-sm font-semibold text-neutral-900 shadow-md border border-neutral-200"
           }
         >
@@ -517,7 +575,7 @@ export default function AeronoocMap({
         {/* Airport marker (shown even when no listings) */}
         {airportCoords && airportCode && (
           <Marker longitude={airportCoords[0]} latitude={airportCoords[1]} anchor="bottom">
-            <span className="inline-flex items-center justify-center rounded-full border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700 shadow-sm">
+            <span className="inline-flex items-center justify-center rounded-full border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700 shadow-[0_8px_18px_rgba(15,23,42,0.08)]">
               <span className="font-mono tabular-nums">{airportCode}</span> ✈
             </span>
           </Marker>

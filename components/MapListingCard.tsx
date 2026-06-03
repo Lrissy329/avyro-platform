@@ -5,7 +5,6 @@ import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import { formatReviewSummaryLineFromScore } from "@/lib/reviews";
 import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
-import { SharedStayBadge } from "@/components/shared-stay/SharedStayBadge";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
 
@@ -146,32 +145,33 @@ const buildTravelBadge = (listing: MapListing) => {
 };
 
 const buildTitle = (listing: MapListing) => {
+  if (typeof listing.title === "string" && listing.title.trim().length > 0) return listing.title;
   const beds = listing.beds ?? listing.bedrooms ?? null;
   const bedLabel = beds ? `${beds} Bed` : null;
   const room = normaliseType(listing.type);
-  const minutes =
-    safeMinutes(listing.travelMinutesMin) ?? safeMinutes(listing.driveMinutesToAirport);
-  const distanceLabel =
-    minutes != null
-      ? `${minutes} min from ${listing.airportCode ?? "Airport"}`
-      : listing.airportCode
-      ? `Near ${listing.airportCode}`
-      : null;
+  if ((listing.isSharedStay ?? (listing as any).is_shared_stay) === true) {
+    return listing.airportCode ? `Shared stay near ${listing.airportCode}` : "Shared stay near the airport";
+  }
   const combined = [bedLabel, room].filter(Boolean).join(" ");
-  if (combined && distanceLabel) return `${combined} · ${distanceLabel}`;
-  return combined || listing.title || "Listing";
+  if (combined) return combined;
+  return listing.airportCode ? `Crew house near ${listing.airportCode}` : "Professional stay near the airport";
 };
 
 const buildSubline = (listing: MapListing) => {
-  const room = normaliseType(listing.type);
-  let restNote: string | null = null;
-  if (listing.quietForRest) restNote = "Quiet for rest";
-  else if (listing.blackoutBlinds) restNote = "Blackout blinds";
-  else if (listing.access24_7) restNote = "24/7 access";
-  if (!restNote) restNote = "Crew-ready";
-  const parts = [room, restNote].filter(Boolean);
-  return parts.length ? parts.join(" · ") : null;
+  const isSharedStay = Boolean(listing.isSharedStay ?? (listing as any).is_shared_stay);
+  if (isSharedStay) {
+    const spotsRemaining =
+      toNumber(listing.sharedSpotsRemaining) ?? toNumber((listing as any).shared_spots_remaining);
+    if (spotsRemaining != null && spotsRemaining > 0) {
+      return "Join other professionals already staying nearby.";
+    }
+    return "Professional weekly stay near the airport.";
+  }
+  return "Reliable base for training blocks and rotations.";
 };
+
+const pluralize = (value: number, label: string) =>
+  `${value} ${label}${value === 1 ? "" : "s"}`;
 
 export default function MapListingCard({
   listing,
@@ -241,23 +241,31 @@ export default function MapListingCard({
   );
   const imageSrc = pickImage(listing);
   const listingId = listing.id;
-  const stayBadge = bookingUnit === "hourly" ? "DAY-USE" : "OVERNIGHT";
-  const distanceMiles =
-    listing.distanceKmToAirport != null
-      ? Math.round(listing.distanceKmToAirport * 0.621371 * 10) / 10
-      : null;
-  const facts = [
+  const stayBadge = isSharedStay ? "Shared stay" : bookingUnit === "hourly" ? "Day-use" : "Overnight";
+  const metadataLine = [
+    travelBadge,
     normaliseType(listing.type),
-    listing.bedrooms ? `${listing.bedrooms} Bedroom${listing.bedrooms === 1 ? "" : "s"}` : null,
-    listing.bathrooms ? `${listing.bathrooms} Bathroom${listing.bathrooms === 1 ? "" : "s"}` : null,
-  ].filter(Boolean);
-  const restMeta = [
-    "Crew-ready",
-    listing.quietForRest ? "Quiet" : null,
-    listing.blackoutBlinds ? "Blackout" : null,
+    isSharedStay
+      ? listing.sharedTotalSpots
+        ? pluralize(Math.max(1, Math.round(Number(listing.sharedTotalSpots))), "spot")
+        : null
+      : listing.beds
+      ? pluralize(Math.max(1, Math.round(Number(listing.beds))), "bed")
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
+  const ctaLabel = isSharedStay ? "Join shared stay →" : "View stay →";
+  const priceDetail = isSharedStay ? "per person / week" : `per ${unitLabel}`;
+  const secondaryPriceLine = isSharedStay
+    ? (() => {
+        const remaining =
+          toNumber(listing.sharedSpotsRemaining) ?? toNumber((listing as any).shared_spots_remaining);
+        if (remaining == null) return "Weekly shared stay";
+        if (remaining <= 0) return "Full";
+        return `${Math.round(remaining)} spot${Math.round(remaining) === 1 ? "" : "s"} remaining`;
+      })()
+    : "All fees included";
   const reviewOverall = toNumber(listing.review_overall ?? listing.reviewOverall);
   const reviewTotal = toNumber(listing.review_total ?? listing.reviewTotal);
   const reviewLine =
@@ -275,11 +283,11 @@ export default function MapListingCard({
       onClick={() => onSelect?.()}
     >
       <article
-        className={`grid gap-6 rounded-[28px] border border-slate-300 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:grid-cols-[220px_1fr_190px] ${
-          active ? "border-[#0B0D10] shadow-md" : "hover:border-slate-400"
+        className={`grid gap-5 rounded-[28px] border border-neutral-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:grid-cols-[236px_1fr_170px] ${
+          active ? "border-[#0B0D10] shadow-md" : "hover:border-slate-300"
         }`}
       >
-        <div className="relative h-[160px] w-full overflow-hidden rounded-2xl bg-slate-100 sm:h-[140px]">
+        <div className="relative h-[184px] w-full overflow-hidden rounded-2xl bg-slate-100 sm:h-[164px]">
           <Image
             src={imageSrc}
             alt={listing.title ?? "Listing image"}
@@ -287,55 +295,31 @@ export default function MapListingCard({
             className="object-cover"
             sizes="240px"
           />
-          <span className="absolute bottom-2 left-2 rounded-md bg-black px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#FEDD02]">
+          <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
             {stayBadge}
           </span>
-          {distanceMiles != null && (
-            <span className="absolute right-2 top-2 rounded-full border border-white/40 bg-black/75 px-2 py-1 text-[10px] font-semibold text-white">
-              {distanceMiles} mi
+          {travelBadge && (
+            <span className="absolute bottom-3 left-3 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+              {travelBadge}
             </span>
           )}
         </div>
 
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-3 text-sm font-semibold text-slate-900">
-            {travelBadge && (
-              <span className="font-mono text-sm font-semibold text-slate-900 tabular-nums">
-                {travelBadge}
-              </span>
-            )}
-            <span className="text-xs font-medium text-slate-500">{restMeta}</span>
-          </div>
-
           <div>
-            <h3 className="text-lg font-semibold text-[#0B0D10] font-display">
+            <h3 className="line-clamp-2 text-lg font-semibold text-[#0B0D10] font-display">
               {titleLine}
             </h3>
-            <p className="mt-1 text-sm text-[#4B5563]">{subline}</p>
-            <SharedStayBadge
-              isSharedStay={isSharedStay}
-              perPersonWeeklyPrice={sharedWeeklyPriceMajor}
-              spotsRemaining={listing.sharedSpotsRemaining ?? null}
-              totalSpots={listing.sharedTotalSpots ?? null}
-              className="mt-2"
-            />
+            <p className="mt-1 line-clamp-2 text-sm text-[#4B5563]">{subline}</p>
+            {metadataLine ? (
+              <p className="mt-2 line-clamp-1 text-sm text-neutral-600">{metadataLine}</p>
+            ) : null}
             {reviewLine ? (
               <p className="mt-1 text-xs text-[#4B5563] font-mono tabular-nums">
                 {reviewLine}
               </p>
             ) : null}
           </div>
-
-          {facts.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 text-xs text-[#4B5563]">
-              {facts.map((fact, index) => (
-                <span key={fact as string}>
-                  {index > 0 ? "· " : ""}
-                  {fact}
-                </span>
-              ))}
-            </div>
-          )}
 
           {(taxiRange || busRange) && (
             <div className="flex flex-wrap items-center gap-4 text-xs text-[#4B5563]">
@@ -351,27 +335,21 @@ export default function MapListingCard({
                   <span>{busRange}</span>
                 </span>
               )}
-              {listing.airportCode && (
-                <span className="flex items-center gap-2 text-slate-300">
-                  <span className="h-px w-12 border-t border-dashed border-slate-300" />
-                  ✈
-                </span>
-              )}
             </div>
           )}
+
+          <div className="mt-auto pt-1 text-sm font-medium text-neutral-800">{ctaLabel}</div>
         </div>
 
-        <div className="flex flex-col items-end justify-between text-right">
+        <div className="flex flex-col items-start justify-end text-left sm:items-end sm:text-right">
           <div>
             {guestUnitPrice != null && (
-              <div className="text-xl font-semibold text-[#0B0D10] font-mono tabular-nums">
-                {formatCurrency(guestUnitPrice)} / {unitLabel}
+              <div className="text-[1.45rem] font-semibold text-[#0B0D10] font-mono tabular-nums">
+                {formatCurrency(guestUnitPrice)}
               </div>
             )}
-            <div className="text-xs font-medium text-[#4B5563]">All fees included</div>
-            {listing.freeCancellation && (
-              <div className="mt-1 text-xs text-slate-500">Free cancellation</div>
-            )}
+            <div className="text-xs font-medium text-[#4B5563]">{priceDetail}</div>
+            <div className="mt-1 text-xs text-slate-500">{secondaryPriceLine}</div>
           </div>
         </div>
       </article>

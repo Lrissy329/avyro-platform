@@ -16,6 +16,7 @@ const MapView = dynamic(() => import("@/components/map"), { ssr: false });
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 const UBER_MAP_STYLE = "mapbox://styles/mapbox/streets-v12";
 const __DEV__ = process.env.NODE_ENV !== "production";
+const ENABLE_SEARCH_DEBUG = process.env.NEXT_PUBLIC_DEBUG_SEARCH === "true";
 
 // ---------------- Coordinates helpers (unchanged) ----------------
 const airportCoords: Record<string, [number, number]> = {
@@ -523,7 +524,7 @@ export default function SearchPage() {
         const parsed = JSON.parse(q.guests);
         guests = Number(parsed?.total || parsed?.adults || 0);
       } catch (err) {
-        if (__DEV__) console.warn("[search] invalid guests payload", err);
+        if (__DEV__ && ENABLE_SEARCH_DEBUG) console.warn("[search] invalid guests payload", err);
       }
     }
     if (!guests) guests = 1;
@@ -665,7 +666,7 @@ export default function SearchPage() {
             }
           }
           const coordsMissing = !coords;
-          if (coordsMissing) {
+          if (coordsMissing && __DEV__ && ENABLE_SEARCH_DEBUG) {
             console.warn("[search] listing missing coords", {
               id,
               title: l.title ?? l.name ?? "Listing",
@@ -759,7 +760,7 @@ export default function SearchPage() {
           };
         });
 
-        if (__DEV__) {
+        if (__DEV__ && ENABLE_SEARCH_DEBUG) {
           normalized
             .filter((listing) => listing.isSharedStay)
             .forEach((listing) => {
@@ -798,7 +799,7 @@ export default function SearchPage() {
             bookingUnit === "hourly" ? "hourly" : "nightly"
           );
           if (listingPrice == null || !Number.isFinite(listingPrice) || listingPrice <= 0) {
-            if (__DEV__ && listing.isSharedStay) {
+            if (__DEV__ && ENABLE_SEARCH_DEBUG && listing.isSharedStay) {
               console.log(
                 "SEARCH_SHARED_LISTING_DEBUG\n" +
                   JSON.stringify(
@@ -993,7 +994,9 @@ export default function SearchPage() {
         const withCoords = filtered.filter(
           (l) => Array.isArray(l.coords) && isValidLng(l.coords![0]) && isValidLat(l.coords![1])
         );
-        if (__DEV__) console.log("[search/supabase] filtered:", filtered.length, "withCoords:", withCoords.length);
+        if (__DEV__ && ENABLE_SEARCH_DEBUG) {
+          console.log("[search/supabase] filtered:", filtered.length, "withCoords:", withCoords.length);
+        }
 
         // Optional sort: best for crew (shortest commute, then rest-friendly flags)
         let sorted = filtered;
@@ -1217,16 +1220,19 @@ export default function SearchPage() {
     setShowSearchArea(false);
   }, [airportCode]);
 
-  if (__DEV__) console.log("[search] listings count:", listings.length, "center:", safeCenter);
+  if (__DEV__ && ENABLE_SEARCH_DEBUG) {
+    console.log("[search] listings count:", listings.length, "center:", safeCenter);
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <header className="sticky top-20 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="w-full px-6 py-4">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="w-full max-w-[820px]">
+      <header className="sticky top-16 z-40 border-b border-slate-200/90 bg-white/94 backdrop-blur-md">
+        <div className="w-full px-4 py-2.5 lg:px-5 lg:py-2">
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(460px,550px)_minmax(0,1fr)] lg:items-start">
+            <div className="min-w-0 lg:hidden">
               <SearchBar
                 align="left"
+                variant="compact"
                 onSearch={() => undefined}
                 initialQuery={{
                   location: q.location,
@@ -1244,51 +1250,54 @@ export default function SearchPage() {
                 }}
               />
             </div>
-            <div className="flex flex-col items-end gap-2">
-              <button
-                type="button"
-                onClick={() => setFilterOpen(true)}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:border-slate-500"
-              >
-                Filters
-                {activeFilterCount > 0 && (
-                  <span className="rounded-full bg-[#FEDD02] px-2 py-0.5 text-xs font-semibold text-black">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </button>
-              {activeFilters.length > 0 && (
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  {activeFilters.map((filter) => (
+            <div className="hidden lg:block" />
+            <div className="min-w-0">
+              <div className="flex min-h-[40px] flex-wrap items-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-2.5 py-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
+                <button
+                  type="button"
+                  onClick={() => setFilterOpen(true)}
+                  className="inline-flex h-8 items-center gap-2 rounded-full border border-slate-300 px-3 text-[12px] font-medium text-slate-800 hover:border-slate-500"
+                >
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <span className="rounded-full bg-[#FEDD02] px-1.5 py-0.5 text-[11px] font-semibold text-black">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+                {activeFilters.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {activeFilters.map((filter) => (
+                      <button
+                        key={filter.key}
+                        type="button"
+                        onClick={filter.onClear}
+                        className="inline-flex h-7 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:border-slate-400"
+                      >
+                        {filter.label}
+                        <span className="text-slate-400">×</span>
+                      </button>
+                    ))}
                     <button
-                      key={filter.key}
                       type="button"
-                      onClick={filter.onClear}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-400"
+                      onClick={clearFiltersExceptAirport}
+                      className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:border-slate-400"
                     >
-                      {filter.label}
-                      <span className="text-slate-400">×</span>
+                      Clear all
                     </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={clearFiltersExceptAirport}
-                    className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-400"
-                  >
-                    Clear all
-                  </button>
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-[44%_56%]">
+      <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-[minmax(460px,550px)_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col border-r border-slate-200">
-          <div ref={resultsRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+          <div ref={resultsRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3.5 lg:px-5 lg:py-3.5">
             {airportCode && (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-[13px] text-slate-700">
                 <span className="font-semibold">{listings.length}</span> verified stays near{" "}
                 <span className="font-mono tabular-nums">{airportCode}</span>. All listings meet
                 enforced booking rules.

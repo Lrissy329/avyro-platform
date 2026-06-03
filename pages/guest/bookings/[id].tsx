@@ -85,7 +85,7 @@ export default function GuestBookingDetailPage() {
   }, [loadReviewEligibility]);
 
   const handleCancelBooking = useCallback(async () => {
-    if (!booking?.id || !userId || !canGuestCancel(localStatus ?? booking.status)) return;
+    if (!booking?.id || !userId || !canGuestCancel(localStatus ?? booking.status, booking.stripe_status)) return;
 
     const confirmed = window.confirm(
       "Cancel this booking? We’ll notify the host and release the dates."
@@ -201,6 +201,7 @@ export default function GuestBookingDetailPage() {
   }, [booking?.id, refresh]);
 
   const status = String(localStatus ?? booking?.status ?? "").toLowerCase();
+  const stripeStatus = booking?.stripe_status ?? null;
   const checkIn = booking ? resolveBookingCheckIn(booking) : null;
   const checkOut = booking ? resolveBookingCheckOut(booking) : null;
   const nights = booking ? bookingNights(booking) : null;
@@ -255,8 +256,8 @@ export default function GuestBookingDetailPage() {
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Booking ref</p>
                   <p className="mt-1 font-mono text-sm font-semibold text-slate-900">{bookingReference(booking.id)}</p>
                 </div>
-                <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusClassName(status)}`}>
-                  {statusLabel(status)}
+                <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusClassName(status, stripeStatus)}`}>
+                  {statusLabel(status, stripeStatus)}
                 </span>
               </div>
             </Card>
@@ -282,7 +283,7 @@ export default function GuestBookingDetailPage() {
                         ? Math.round(Number(booking.price_total) * 100)
                         : null
                     }
-                    groupStatus={status}
+                    groupStatus={statusLabel(status, stripeStatus)}
                     occupancy={{
                       filled: null,
                       total: listing?.shared_total_spots ?? null,
@@ -315,7 +316,7 @@ export default function GuestBookingDetailPage() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Status</span>
-                      <span className="font-semibold text-slate-900">{statusLabel(status)}</span>
+                      <span className="font-semibold text-slate-900">{statusLabel(status, stripeStatus)}</span>
                     </div>
                   </div>
                 </Card>
@@ -379,7 +380,7 @@ export default function GuestBookingDetailPage() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Payment status</span>
-                      <span className="font-semibold text-slate-900">{statusLabel(status)}</span>
+                      <span className="font-semibold text-slate-900">{statusLabel(status, stripeStatus)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Date paid</span>
@@ -437,7 +438,7 @@ export default function GuestBookingDetailPage() {
                       {copyState === "done" ? "Address copied" : copyState === "error" ? "Copy failed" : "Copy address"}
                     </button>
 
-                    {canGuestCancel(status) ? (
+                    {canGuestCancel(status, stripeStatus) ? (
                       <button
                         type="button"
                         disabled={canceling}

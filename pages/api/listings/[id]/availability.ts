@@ -15,6 +15,7 @@ type AvailabilityResponse = {
   booked: string[];
   blocked: string[];
   held: string[];
+  sharedOccupied: string[];
   baseAvailable: boolean;
   extraNightAvailable: boolean;
   rollingFlexAvailable: boolean;
@@ -39,6 +40,9 @@ const isMissingRelation = (error: any) => {
 const ENABLE_AVAILABILITY_DEBUG =
   process.env.NODE_ENV === "development" &&
   process.env.NEXT_PUBLIC_DEBUG_AVAILABILITY === "1";
+const ENABLE_SHARED_AVAILABILITY_DEBUG =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_DEBUG_SHARED_AVAILABILITY === "1";
 
 const parseDayKey = (value: string) => toUtcDateOnly(value);
 const markRangeDays = (
@@ -163,6 +167,7 @@ export default async function handler(
       ignoreSharedGroupBookings: isSharedStayListing,
     });
 
+    const sharedOccupied = new Set<string>();
     if (isSharedStayListing) {
       const sharedGroupsResult = await supabase
         .from("shared_groups")
@@ -235,9 +240,44 @@ export default async function handler(
         const occupied = occupancy.confirmed + occupancy.pending;
         const isClosed = status === "closed";
         const isFull = status === "full" || occupied >= totalSpots;
-        if (!isClosed && !isFull) return;
-        markRangeDays(start, end, blocked, windowStart, windowEnd, booked);
+        const hasConfirmedOccupancy = occupancy.confirmed > 0;
+        if (ENABLE_SHARED_AVAILABILITY_DEBUG) {
+          console.log(
+            "SHARED_AVAILABILITY_DEBUG\n" +
+              JSON.stringify(
+                {
+                  shared_group_id: String(group?.id ?? ""),
+                  listing_id: id,
+                  start_date: String(group?.start_date ?? ""),
+                  end_date: String(group?.end_date ?? ""),
+                  status,
+                  confirmed_spots: occupancy.confirmed,
+                  pending_spots: occupancy.pending,
+                  total_spots: totalSpots,
+                  blocked_for_calendar: isClosed || isFull,
+                  shared_occupied_for_calendar: !isClosed && !isFull && hasConfirmedOccupancy,
+                  block_reason: isClosed
+                    ? "closed_group"
+                    : isFull
+                    ? "full_group"
+                    : hasConfirmedOccupancy
+                    ? "open_group_confirmed_joinable"
+                    : "open_group_joinable",
+                },
+                null,
+                2
+              )
+          );
+        }
+        if (isClosed || isFull) {
+          markRangeDays(start, end, blocked, windowStart, windowEnd, booked);
+          return;
+        }
+        if (hasConfirmedOccupancy) {
+          markRangeDays(start, end, sharedOccupied, windowStart, windowEnd, booked);
+        }
       });
+
     }
 
     const listingAllowsFlexibleStays = (listingRow as any)?.allow_flexible_stays ?? false;
@@ -298,6 +338,7 @@ export default async function handler(
       booked: Array.from(booked).sort(),
       blocked: Array.from(blocked).sort(),
       held: Array.from(held).sort(),
+      sharedOccupied: Array.from(sharedOccupied).sort(),
       baseAvailable,
       extraNightAvailable,
       rollingFlexAvailable,

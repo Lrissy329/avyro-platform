@@ -2,6 +2,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  getHostingHomeHref,
+  getTravellingHomeHref,
+  hasGuestAccess,
+  hasHostAccess,
+  resolvePrimaryRole,
+} from "@/lib/roleMode";
 
 function getRedirect(raw: string | string[] | undefined): string {
   if (!raw) return "/";
@@ -41,6 +48,31 @@ export default function LoginPage() {
     }
   };
 
+  const resolveSignedInDestination = async (userId: string) => {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role_host, role_guest, primary_role, active_role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    const primaryRole = resolvePrimaryRole(profile);
+    if (!primaryRole) return "/role-setup";
+
+    const canHost = hasHostAccess(profile);
+    const canGuest = hasGuestAccess(profile);
+
+    if (canHost && canGuest) return "/select-role";
+    if (canHost) {
+      const { count } = await supabase
+        .from("listings")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId);
+      return getHostingHomeHref((count ?? 0) > 0);
+    }
+    if (canGuest) return getTravellingHomeHref();
+    return "/role-setup";
+  };
+
   // If already logged in, go straight to redirect (when router is ready)
   useEffect(() => {
     if (!router.isReady) return;
@@ -51,23 +83,15 @@ export default function LoginPage() {
       const session = data?.session;
       if (!session || cancelled) return;
 
-      // If we have a redirect target, go there
-      if (redirect) {
+      const fallbackDestination = await resolveSignedInDestination(session.user.id);
+      if (cancelled) return;
+
+      if (fallbackDestination !== "/role-setup" && redirect && redirect !== "/") {
         safeReplace(redirect);
         return;
       }
 
-      // Fallback: role-based routing
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role_host, role_guest")
-        .eq("id", session.user.id)
-        .maybeSingle();
-
-      if (profile?.role_host && !profile?.role_guest) safeReplace("/host/dashboard");
-      else if (profile?.role_guest && !profile?.role_host) safeReplace("/guest/dashboard");
-      else if (profile?.role_host && profile?.role_guest) safeReplace("/select-role");
-      else safeReplace("/role-setup");
+      safeReplace(fallbackDestination);
     })();
 
     return () => {
@@ -88,7 +112,16 @@ export default function LoginPage() {
         setErrorMsg(error.message);
         return;
       }
-      safeReplace(redirect || "/");
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const destination = session?.user ? await resolveSignedInDestination(session.user.id) : "/login";
+
+      if (destination !== "/role-setup" && redirect && redirect !== "/") {
+        safeReplace(redirect);
+      } else {
+        safeReplace(destination);
+      }
     } catch (err: any) {
       setErrorMsg(err?.message || "Unexpected error");
     } finally {

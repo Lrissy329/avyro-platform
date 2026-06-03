@@ -146,6 +146,13 @@ const addDaysToDateInput = (dateStr: string, days: number) => {
   const next = new Date(year, (month ?? 1) - 1, (day ?? 1) + days);
   return toDateInputValue(next);
 };
+const addDaysToIsoKey = (dateStr: string, days: number) => {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const next = new Date(year, month - 1, day + days);
+  if (!Number.isFinite(next.getTime())) return null;
+  return toDateInputValue(next);
+};
 const parseDateInputValue = (value: string) => {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return null;
@@ -277,6 +284,9 @@ export default function BookingWidget({
   const [bookedSet, setBookedSet] = useState<Set<string>>(new Set());
   const [blockedSet, setBlockedSet] = useState<Set<string>>(new Set());
   const [heldSet, setHeldSet] = useState<Set<string>>(new Set());
+  const [sharedOccupiedSet, setSharedOccupiedSet] = useState<Set<string>>(new Set());
+  const [pendingQuickJoinGroupId, setPendingQuickJoinGroupId] = useState<string | null>(null);
+  const [showSharedCreationFlow, setShowSharedCreationFlow] = useState(false);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const latestAvailabilityRequestIdRef = useRef(0);
   const hasAppliedAvailabilityRef = useRef(false);
@@ -494,7 +504,7 @@ export default function BookingWidget({
   }, [isHourlyStay, checkInDate, checkOutDate, stayType]);
 
   useEffect(() => {
-    if (isHourlyStay || isSharedStayListing) return;
+    if (isHourlyStay) return;
     if (!nightlyRange) return;
     const nextCheckIn = nightlyRange.from ? toDateInputValue(nightlyRange.from) : "";
     const nextCheckOut = nightlyRange.to ? toDateInputValue(nightlyRange.to) : "";
@@ -504,7 +514,7 @@ export default function BookingWidget({
     if (nextCheckOut !== checkOutDate) {
       setCheckOutDate(nextCheckOut);
     }
-  }, [nightlyRange, isHourlyStay, isSharedStayListing, checkInDate, checkOutDate]);
+  }, [nightlyRange, isHourlyStay, checkInDate, checkOutDate]);
 
   useEffect(() => {
     if (isHourlyStay || isSharedStayListing) return;
@@ -636,6 +646,51 @@ export default function BookingWidget({
     selectedDateRange: sharedDateRange,
     enabled: isSharedStayListing && !isHourlyStay,
   });
+  useEffect(() => {
+    if (!isSharedStayListing) return;
+    debugLog(
+      "SHARED_STAY_DATE_DEBUG\n" +
+        JSON.stringify(
+          {
+            listing_id: listingId,
+            selected_dates: {
+              check_in: checkInDate || null,
+              check_out: checkOutDate || null,
+            },
+            derived: {
+              selected_shared_nights: selectedSharedNights,
+              selected_shared_weeks_raw: selectedSharedWeeksRaw,
+              selected_shared_weeks: selectedSharedWeeks,
+              is_shared_weeks_range_valid: isSharedWeeksRangeValid,
+              has_valid_shared_range: hasValidSharedRange,
+            },
+            shared_options_visibility: {
+              loading: sharedOptionsLoading,
+              hidden_reason: !checkInDate || !checkOutDate
+                ? "missing_dates"
+                : !isSharedWeeksRangeValid
+                ? "invalid_shared_weeks"
+                : !hasValidSharedRange
+                ? "invalid_shared_range"
+                : null,
+            },
+          },
+          null,
+          2
+        )
+    );
+  }, [
+    checkInDate,
+    checkOutDate,
+    hasValidSharedRange,
+    isSharedStayListing,
+    isSharedWeeksRangeValid,
+    listingId,
+    selectedSharedNights,
+    selectedSharedWeeks,
+    selectedSharedWeeksRaw,
+    sharedOptionsLoading,
+  ]);
   const sharedMinWeeksAllowed = Math.max(
     sharedMinWeeksBase,
     Math.round(Number(sharedOptions?.minWeeks ?? sharedMinWeeksBase)) || sharedMinWeeksBase
@@ -949,6 +1004,7 @@ export default function BookingWidget({
     () => (sharedOptions?.groups ?? []).filter((group) => group.canJoin),
     [sharedOptions?.groups]
   );
+  const hasAnySharedGroup = (sharedOptions?.groups?.length ?? 0) > 0;
   const hasOpenSharedGroup = sharedJoinableGroups.length > 0;
   const sharedSelectedGroup = useMemo(
     () =>
@@ -973,7 +1029,9 @@ export default function BookingWidget({
     !isSharedWeeksRangeValid ||
     !checkInDate ||
     !checkOutDate ||
-    sharedOptionsLoading;
+    sharedOptionsLoading ||
+    Boolean(sharedOptions?.reason) ||
+    Boolean(sharedOptions?.groups?.length);
   const hasDateSelection = Boolean(checkInDate) && Boolean(checkOutDate);
   const hasValidDateSelection =
     hasDateSelection &&
@@ -1020,6 +1078,22 @@ export default function BookingWidget({
           helper: "Checking open groups for these dates.",
         };
       }
+      if (sharedOptions?.reason && !hasOpenSharedGroup) {
+        return {
+          label: "Unavailable for selected dates",
+          disabled: true,
+          reason: "shared_range_reserved",
+          helper: sharedOptions.reason,
+        };
+      }
+      if (hasAnySharedGroup && !hasOpenSharedGroup) {
+        return {
+          label: "Unavailable for selected dates",
+          disabled: true,
+          reason: "shared_group_full",
+          helper: "This shared stay is already reserved for these dates.",
+        };
+      }
       if (hasOpenSharedGroup) {
         return {
           label: "Join this stay",
@@ -1029,7 +1103,7 @@ export default function BookingWidget({
         };
       }
       return {
-        label: "Start a new group",
+        label: "Start a new shared stay",
         disabled: false,
         reason: null,
         helper: "Be the first to reserve this shared stay.",
@@ -1099,6 +1173,8 @@ export default function BookingWidget({
     hasValidSharedRange,
     sharedJoinModeNormalized,
     sharedOptionsLoading,
+    hasAnySharedGroup,
+    sharedOptions?.reason,
     hasOpenSharedGroup,
   ]);
 
@@ -1366,6 +1442,7 @@ export default function BookingWidget({
         const booked = normalizeDayKeys(payload?.booked);
         const blocked = normalizeDayKeys(payload?.blocked);
         const held = normalizeDayKeys(payload?.held);
+        const sharedOccupied = normalizeDayKeys(payload?.sharedOccupied);
 
         debugLog(
           "AVAILABILITY_REQUEST_SUCCESS\n" +
@@ -1379,6 +1456,7 @@ export default function BookingWidget({
                 booked_count: booked.length,
                 blocked_count: blocked.length,
                 held_count: held.length,
+                shared_occupied_count: sharedOccupied.length,
               },
               null,
               2
@@ -1398,6 +1476,7 @@ export default function BookingWidget({
                   booked_count: booked.length,
                   blocked_count: blocked.length,
                   held_count: held.length,
+                  shared_occupied_count: sharedOccupied.length,
                 },
                 null,
                 2
@@ -1411,7 +1490,8 @@ export default function BookingWidget({
           typeof payload === "object" &&
           Array.isArray(payload.booked) &&
           Array.isArray(payload.blocked) &&
-          Array.isArray(payload.held);
+          Array.isArray(payload.held) &&
+          Array.isArray(payload.sharedOccupied ?? []);
         if (!response.ok || !hasExpectedShape) {
           debugWarn(
             "AVAILABILITY_RESPONSE_INVALID\n" +
@@ -1431,6 +1511,7 @@ export default function BookingWidget({
             setBookedSet(new Set());
             setBlockedSet(new Set());
             setHeldSet(new Set());
+            setSharedOccupiedSet(new Set());
           }
           return;
         }
@@ -1438,6 +1519,7 @@ export default function BookingWidget({
         setBookedSet(new Set(booked));
         setBlockedSet(new Set(blocked));
         setHeldSet(new Set(held));
+        setSharedOccupiedSet(new Set(sharedOccupied));
         hasAppliedAvailabilityRef.current = true;
         debugLog(
           "AVAILABILITY_STATE_APPLIED\n" +
@@ -1450,6 +1532,7 @@ export default function BookingWidget({
                 booked_count: booked.length,
                 blocked_count: blocked.length,
                 held_count: held.length,
+                shared_occupied_count: sharedOccupied.length,
               },
               null,
               2
@@ -1478,6 +1561,7 @@ export default function BookingWidget({
           setBookedSet(new Set());
           setBlockedSet(new Set());
           setHeldSet(new Set());
+          setSharedOccupiedSet(new Set());
         }
       } finally {
         if (requestId === latestAvailabilityRequestIdRef.current) {
@@ -1547,6 +1631,7 @@ export default function BookingWidget({
             booked_count: bookedSet.size,
             blocked_count: blockedSet.size,
             held_count: heldSet.size,
+            shared_occupied_count: sharedOccupiedSet.size,
             disabled_count: disabledSet.size,
             has_applied_availability: hasAppliedAvailabilityRef.current,
           },
@@ -1563,6 +1648,7 @@ export default function BookingWidget({
     heldSet,
     isHourlyStay,
     listingId,
+    sharedOccupiedSet,
   ]);
 
   useEffect(() => {
@@ -1625,6 +1711,61 @@ export default function BookingWidget({
     );
   }, [isSharedStayListing, sharedOptions]);
 
+  useEffect(() => {
+    if (!isSharedStayListing || !pendingQuickJoinGroupId) return;
+    const queuedGroup = (sharedOptions?.groups ?? []).find(
+      (group) => group.id === pendingQuickJoinGroupId && group.canJoin
+    );
+    if (!queuedGroup || !hasValidSharedRange || !isSharedWeeksRangeValid) return;
+    setSelectedSharedGroupId(queuedGroup.id);
+    setShowJoinSharedModal(true);
+    setPendingQuickJoinGroupId(null);
+  }, [
+    hasValidSharedRange,
+    isSharedStayListing,
+    isSharedWeeksRangeValid,
+    pendingQuickJoinGroupId,
+    sharedOptions?.groups,
+  ]);
+
+  const getSharedOccupiedDayClassName = (key: string) => {
+    if (!sharedOccupiedSet.has(key)) return "";
+    const previousKey = addDaysToIsoKey(key, -1);
+    const nextKey = addDaysToIsoKey(key, 1);
+    const hasPrevious = previousKey ? sharedOccupiedSet.has(previousKey) : false;
+    const hasNext = nextKey ? sharedOccupiedSet.has(nextKey) : false;
+
+    if (hasPrevious && hasNext) return "avyro-day-shared-occupied avyro-day-shared-occupied-middle";
+    if (hasPrevious) return "avyro-day-shared-occupied avyro-day-shared-occupied-end";
+    if (hasNext) return "avyro-day-shared-occupied avyro-day-shared-occupied-start";
+    return "avyro-day-shared-occupied avyro-day-shared-occupied-single";
+  };
+
+  const handleQuickJoinSharedGroup = (group: SharedGroupOption) => {
+    const start = parseDateInputValue(group.startDate);
+    const end = parseDateInputValue(group.endDate);
+    if (!start || !end) return;
+
+    const totalNights = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const derivedWeeks = Math.max(
+      sharedMinWeeksAllowed,
+      Math.min(sharedMaxWeeksAllowed, Math.round(totalNights / 7) || sharedMinWeeksAllowed)
+    );
+
+    setErr(null);
+    setMsg(null);
+    setShowSharedCreationFlow(false);
+    setSelectedSharedGroupId(group.id);
+    setPendingQuickJoinGroupId(group.id);
+    setStartGroupWeeks(derivedWeeks);
+    setCheckInDate(group.startDate);
+    setCheckOutDate(group.endDate);
+    setDraftStart(start);
+    setDraftEnd(end);
+    setShowCalendar(false);
+    onNightlyRangeChange?.({ from: start, to: end });
+  };
+
   const handleNightlyRangeSelect = (dates: [Date | null, Date | null]) => {
     const [start, end] = dates;
     const clickedDate = end ?? start;
@@ -1664,11 +1805,23 @@ export default function BookingWidget({
       if (!start) {
         setDraftStart(null);
         setDraftEnd(null);
+        setCheckInDate("");
+        setCheckOutDate("");
+        if (onNightlyRangeChange) {
+          onNightlyRangeChange({ from: null, to: null });
+        }
         return;
       }
       const sharedEnd = addDays(start, clampedSharedWeeks * 7);
       setDraftStart(start);
       setDraftEnd(sharedEnd);
+      const nextCheckIn = toDateInputValue(start);
+      const nextCheckOut = toDateInputValue(sharedEnd);
+      setCheckInDate(nextCheckIn);
+      setCheckOutDate(nextCheckOut);
+      if (onNightlyRangeChange) {
+        onNightlyRangeChange({ from: start, to: sharedEnd });
+      }
       return;
     }
     setDraftStart(start);
@@ -1680,11 +1833,12 @@ export default function BookingWidget({
     const resolvedEnd =
       isSharedStayListing && !isHourlyStay ? addDays(draftStart, clampedSharedWeeks * 7) : draftEnd;
     if (!resolvedEnd) return;
+    const nextCheckIn = toDateInputValue(draftStart);
+    const nextCheckOut = toDateInputValue(resolvedEnd);
+    setCheckInDate(nextCheckIn);
+    setCheckOutDate(nextCheckOut);
     if (onNightlyRangeChange) {
       onNightlyRangeChange({ from: draftStart, to: resolvedEnd });
-    } else {
-      setCheckInDate(toDateInputValue(draftStart));
-      setCheckOutDate(toDateInputValue(resolvedEnd));
     }
     setShowCalendar(false);
   };
@@ -1692,11 +1846,10 @@ export default function BookingWidget({
   const clearNightlyRange = () => {
     setDraftStart(null);
     setDraftEnd(null);
+    setCheckInDate("");
+    setCheckOutDate("");
     if (onNightlyRangeChange) {
       onNightlyRangeChange({ from: null, to: null });
-    } else {
-      setCheckInDate("");
-      setCheckOutDate("");
     }
   };
 
@@ -2025,8 +2178,9 @@ export default function BookingWidget({
           sharedOptionsData={sharedOptions}
           loading={sharedOptionsLoading}
           error={sharedOptionsError}
+          showCreationFlow={showSharedCreationFlow}
           joinDisabled={sharedJoinDisabled}
-          startDisabled={sharedStartDisabled}
+          startDisabled={checkInDate && checkOutDate ? sharedStartDisabled : false}
           joinLoading={sharedCheckoutLoadingAction === "join"}
           startLoading={sharedCheckoutLoadingAction === "start"}
           onJoin={() => {
@@ -2034,10 +2188,15 @@ export default function BookingWidget({
             setMsg(null);
             setShowJoinSharedModal(true);
           }}
+          onQuickJoinGroup={(group) => {
+            handleQuickJoinSharedGroup(group);
+          }}
           onStartGroup={() => {
             setErr(null);
             setMsg(null);
-            setShowStartSharedModal(true);
+            setShowSharedCreationFlow(true);
+            setShowCalendar(true);
+            calendarTriggerRef.current?.focus();
           }}
         />
       )}
@@ -2085,10 +2244,10 @@ export default function BookingWidget({
             </div>
           </div>
         </div>
-      ) : (
+      ) : !isSharedStayListing || showSharedCreationFlow ? (
         <div>
           <Label className="text-xs font-medium text-slate-500">
-            Dates
+            {isSharedStayListing ? "Choose shared stay dates" : "Dates"}
           </Label>
           <div className="relative">
             <button
@@ -2147,6 +2306,8 @@ export default function BookingWidget({
                     }}
                     dayClassName={(date) => {
                       const key = toISODate(date);
+                      const sharedOccupiedClassName = getSharedOccupiedDayClassName(key);
+                      if (sharedOccupiedClassName) return sharedOccupiedClassName;
                       if (bookedSet.has(key)) return "avyro-day-booked";
                       if (blockedSet.has(key)) return "avyro-day-blocked";
                       if (heldSet.has(key)) return "avyro-day-held";
@@ -2273,8 +2434,8 @@ export default function BookingWidget({
             </div>
           ) : null}
         </div>
-      )}
-      {isSharedStayListing && !isHourlyStay ? (
+      ) : null}
+      {isSharedStayListing && !isHourlyStay && showSharedCreationFlow ? (
         <p className="text-xs text-slate-600">
           {selectedSharedNights > 0
             ? isSharedWeeksRangeValid

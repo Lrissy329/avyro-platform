@@ -89,7 +89,7 @@ export function JoinSharedStayModal({
                   className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
                   onClick={onStartGroup}
                 >
-                  Start a new group
+                  Start a new shared stay
                 </button>
               ) : null}
             </div>
@@ -127,7 +127,7 @@ export function JoinSharedStayModal({
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
               onClick={onStartGroup}
             >
-              Start a new group
+              Start a new shared stay
             </button>
           ) : null}
         </DialogFooter>

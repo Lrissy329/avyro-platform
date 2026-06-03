@@ -840,6 +840,14 @@ html, body, #__next { height: 100%; }
   cursor: not-allowed;
 }
 
+.availability-datepicker .avyro-day-shared-occupied {
+  position: relative;
+  background-color: rgba(15, 23, 42, 0.1) !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+  border-radius: 0 !important;
+}
+
 .availability-datepicker .avyro-day-booked::after,
 .availability-datepicker .avyro-day-blocked::after,
 .availability-datepicker .avyro-day-held::after {
@@ -850,6 +858,30 @@ html, body, #__next { height: 100%; }
   top: 50%;
   height: 1px;
   background-color: rgba(11, 13, 16, 0.45);
+}
+
+.availability-datepicker .avyro-day-shared-occupied-start {
+  border-top-left-radius: 9999px !important;
+  border-bottom-left-radius: 9999px !important;
+}
+
+.availability-datepicker .avyro-day-shared-occupied-end {
+  border-top-right-radius: 9999px !important;
+  border-bottom-right-radius: 9999px !important;
+}
+
+.availability-datepicker .avyro-day-shared-occupied-single {
+  border-radius: 9999px !important;
+}
+
+.availability-datepicker .react-datepicker__day--selected.avyro-day-shared-occupied,
+.availability-datepicker .react-datepicker__day--range-start.avyro-day-shared-occupied,
+.availability-datepicker .react-datepicker__day--range-end.avyro-day-shared-occupied,
+.availability-datepicker .react-datepicker__day--in-range.avyro-day-shared-occupied,
+.availability-datepicker .react-datepicker__day--in-selecting-range.avyro-day-shared-occupied {
+  background-color: #0B0D10 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
 }
 
 .avyro-daypilot-scheduler [class*="scheduler_default"] {

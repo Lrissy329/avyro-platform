@@ -46,7 +46,7 @@ export function useSharedStayCheckout({
   );
 
   const refreshOptions = useCallback(async () => {
-    if (!enabled || !listingId || !hasValidRange) {
+    if (!enabled || !listingId) {
       setOptions(null);
       setOptionsError(null);
       setOptionsLoading(false);
@@ -57,11 +57,11 @@ export function useSharedStayCheckout({
     setOptionsError(null);
 
     try {
-      const params = new URLSearchParams({
-        listingId,
-        checkIn,
-        checkOut,
-      });
+      const params = new URLSearchParams({ listingId });
+      if (hasValidRange) {
+        params.set("checkIn", checkIn);
+        params.set("checkOut", checkOut);
+      }
       const response = await fetch(`/api/shared-groups/options?${params.toString()}`);
       const payload = await response.json().catch(() => null);
       if (!response.ok) {

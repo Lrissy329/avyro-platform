@@ -79,7 +79,9 @@ export default function GuestDashboardTripsPage() {
   }, [buckets.past, reviewEligibilityByBooking, reviewEligibilityLoadingByBooking, fetchReviewEligibility]);
 
   const nextAction = useMemo<NextAction>(() => {
-    const awaitingPaymentBooking = bookings.find((booking) => isAwaitingPayment(booking.status));
+    const awaitingPaymentBooking = bookings.find((booking) =>
+      isAwaitingPayment(booking.status, booking.stripe_status)
+    );
     if (awaitingPaymentBooking) {
       return {
         title: "Your booking is awaiting payment confirmation",

@@ -95,11 +95,11 @@ export default function HostDashboardPage() {
   }, [router]);
 
   return (
-    <HostShellLayout title="Dashboard" activeNav="dashboard">
+    <HostShellLayout title="Hosting insights" activeNav="dashboard">
       <div className="space-y-8">
         <HostPageHeader
-          title="Dashboard"
-          description="Snapshot of bookings, earnings, and upcoming activity."
+          title="Hosting insights"
+          description="Snapshot of occupancy, earnings, and upcoming activity."
         />
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

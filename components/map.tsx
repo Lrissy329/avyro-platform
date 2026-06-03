@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import dynamic from "next/dynamic";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { computeGuestTotalMajorFromHostNet } from "@/lib/pricing";
+import {
+  computeGuestTotalMajorFromHostNet,
+  computeSharedPerPersonWeeklyPricePence,
+} from "@/lib/pricing";
 
 const MapGL = dynamic(() => import("react-map-gl").then((m: any) => m.default ?? m.Map), {
   ssr: false,
@@ -30,6 +33,12 @@ type ListingPin = {
   pricePerHour?: number;
   price_per_night?: number;
   pricePerNight?: number;
+  is_shared_stay?: boolean;
+  isSharedStay?: boolean;
+  shared_weekly_price_pence?: number;
+  sharedWeeklyPricePence?: number;
+  shared_total_spots?: number;
+  sharedTotalSpots?: number;
 };
 
 type AeronoocMapProps = {
@@ -241,8 +250,24 @@ export default function AeronoocMap({
             pin.pricePerHour ??
           pin.price_per_night ?? pin.pricePerNight ?? (pin as any).price
         );
+        const isSharedStay = Boolean(pin.isSharedStay ?? pin.is_shared_stay);
+        const sharedWeeklyPricePence = toNumber(
+          pin.sharedWeeklyPricePence ?? pin.shared_weekly_price_pence
+        );
+        const sharedTotalSpots = Math.max(
+          1,
+          Math.round(Number(pin.sharedTotalSpots ?? pin.shared_total_spots ?? 1)) || 1
+        );
+        const sharedGuestUnitPrice =
+          isSharedStay && sharedWeeklyPricePence != null && sharedWeeklyPricePence > 0
+            ? computeSharedPerPersonWeeklyPricePence({
+                totalWeeklyPricePence: sharedWeeklyPricePence,
+                totalSpots: sharedTotalSpots,
+              }).rounded_per_person_weekly_pence / 100
+            : null;
         const nightly =
           guestStayTotal ??
+          sharedGuestUnitPrice ??
           guestNightly ??
           (hostUnitPrice != null
             ? computeGuestTotalMajorFromHostNet(hostUnitPrice, {

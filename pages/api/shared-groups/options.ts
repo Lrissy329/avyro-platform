@@ -3,9 +3,8 @@ import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
 import { getSharedStayWeeks, normalizeSharedJoinMode, parseIsoDateOnly } from "@/lib/sharedStay";
 import {
-  cleanupExpiredPendingSharedMembers,
-  getSharedGroupOccupancy,
   isMissingSharedSchema,
+  listOverlappingSharedGroupsWithOccupancy,
 } from "@/lib/sharedGroupsDb";
 
 type SharedGroupOption = {
@@ -23,8 +22,8 @@ type SharedGroupOption = {
 
 type SharedGroupOptionsResponse = {
   listingId: string;
-  checkIn: string;
-  checkOut: string;
+  checkIn?: string;
+  checkOut?: string;
   sharedEnabled: boolean;
   joinMode: "open" | "approval";
   weeks: number;
@@ -55,16 +54,17 @@ export default async function handler(
   const listingId = typeof req.query.listingId === "string" ? req.query.listingId : "";
   const checkIn = typeof req.query.checkIn === "string" ? req.query.checkIn : "";
   const checkOut = typeof req.query.checkOut === "string" ? req.query.checkOut : "";
+  const hasRange = Boolean(checkIn && checkOut);
 
-  if (!listingId || !checkIn || !checkOut) {
-    return res.status(400).json({ error: "listingId, checkIn, and checkOut are required." });
+  if (!listingId) {
+    return res.status(400).json({ error: "listingId is required." });
   }
 
-  if (!parseIsoDateOnly(checkIn) || !parseIsoDateOnly(checkOut)) {
+  if (hasRange && (!parseIsoDateOnly(checkIn) || !parseIsoDateOnly(checkOut))) {
     return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD." });
   }
 
-  const weeksResult = getSharedStayWeeks(checkIn, checkOut);
+  const weeksResult = hasRange ? getSharedStayWeeks(checkIn, checkOut) : { valid: false, weeks: 0 };
   const supabase = getSupabaseServerClient();
 
   const listingSelects = [
@@ -110,8 +110,8 @@ export default async function handler(
   if (!sharedEnabled) {
     return res.status(200).json({
       listingId,
-      checkIn,
-      checkOut,
+      checkIn: hasRange ? checkIn : undefined,
+      checkOut: hasRange ? checkOut : undefined,
       sharedEnabled: false,
       joinMode,
       weeks: weeksResult.weeks,
@@ -122,6 +122,56 @@ export default async function handler(
       groups: [],
       suggestedJoinGroupId: null,
       reason: "Listing is not configured for shared crew stays.",
+    });
+  }
+
+  if (!hasRange) {
+    let activeGroups = [];
+    try {
+      activeGroups = await listOverlappingSharedGroupsWithOccupancy(supabase, {
+        listingId,
+        statuses: ["open"],
+        cleanupExpiredPending: true,
+      });
+    } catch (error: any) {
+      if (!isMissingSharedSchema(error)) {
+        return res.status(500).json({ error: error?.message ?? "Unable to load groups." });
+      }
+    }
+
+    const groups: SharedGroupOption[] = activeGroups
+      .filter((group) => group.status === "open" && group.active > 0)
+      .map((group) => {
+        const spotsRemaining = Math.max(0, group.totalSpots - group.active);
+        const normalizedStatus: SharedGroupOption["status"] = spotsRemaining > 0 ? "open" : "full";
+        return {
+          id: group.id,
+          listingId: group.listingId,
+          startDate: group.startDate,
+          endDate: group.endDate,
+          totalSpots: group.totalSpots,
+          filledSpots: group.confirmed,
+          activeHolds: group.pending,
+          spotsRemaining,
+          status: normalizedStatus,
+          canJoin: spotsRemaining > 0,
+        };
+      })
+      .sort((a, b) => a.startDate.localeCompare(b.startDate));
+
+    const suggestedJoinGroup = groups.find((group) => group.canJoin) ?? null;
+
+    return res.status(200).json({
+      listingId,
+      sharedEnabled: true,
+      joinMode,
+      weeks: 0,
+      minWeeks,
+      maxWeeks,
+      perPersonWeeklyPricePence,
+      totalPricePence: null,
+      groups,
+      suggestedJoinGroupId: suggestedJoinGroup?.id ?? null,
     });
   }
 
@@ -163,54 +213,49 @@ export default async function handler(
     });
   }
 
-  const groupResult = await supabase
-    .from("shared_groups")
-    .select("id, listing_id, start_date, end_date, total_spots, filled_spots, status, created_at")
-    .eq("listing_id", listingId)
-    .eq("start_date", checkIn)
-    .eq("end_date", checkOut)
-    .in("status", ["open", "full"])
-    .order("created_at", { ascending: true })
-    .limit(20);
-
-  if (groupResult.error) {
-    if (!isMissingSharedSchema(groupResult.error)) {
-      return res.status(500).json({ error: groupResult.error.message ?? "Unable to load groups." });
+  let overlappingGroups = [];
+  try {
+    overlappingGroups = await listOverlappingSharedGroupsWithOccupancy(supabase, {
+      listingId,
+      windowStart: checkIn,
+      windowEnd: checkOut,
+      statuses: ["open", "full", "closed"],
+      cleanupExpiredPending: true,
+    });
+  } catch (error: any) {
+    if (!isMissingSharedSchema(error)) {
+      return res.status(500).json({ error: error?.message ?? "Unable to load groups." });
     }
   }
 
-  const groupRows = groupResult.data ?? [];
-  const groupIds = groupRows.map((row: any) => String(row.id)).filter(Boolean);
+  const exactGroups = overlappingGroups.filter(
+    (group) => group.startDate === checkIn && group.endDate === checkOut && group.status !== "closed"
+  );
+  const conflictingOccupiedGroup = overlappingGroups.find(
+    (group) =>
+      group.confirmed > 0 &&
+      !(group.startDate === checkIn && group.endDate === checkOut)
+  );
 
-  try {
-    await cleanupExpiredPendingSharedMembers(supabase, groupIds);
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message ?? "Failed to refresh pending members." });
-  }
-
-  const occupancyByGroup = await getSharedGroupOccupancy(supabase, groupIds);
-  const groups: SharedGroupOption[] = groupRows.map((row: any) => {
-    const groupId = String(row.id);
-    const occupancy = occupancyByGroup[groupId] ?? { active: 0, confirmed: 0, pending: 0 };
-    const totalSpots = Math.max(1, toInt(row.total_spots, 1, 1));
-    const spotsRemaining = Math.max(0, totalSpots - occupancy.active);
+  const groups: SharedGroupOption[] = exactGroups.map((group) => {
+    const spotsRemaining = Math.max(0, group.totalSpots - group.active);
     const normalizedStatus: SharedGroupOption["status"] =
-      row.status === "full"
+      group.status === "full"
         ? "full"
-        : row.status === "closed"
+        : group.status === "closed"
         ? "closed"
-        : row.status === "cancelled"
+        : group.status === "cancelled"
         ? "cancelled"
         : "open";
 
     return {
-      id: groupId,
-      listingId: String(row.listing_id),
-      startDate: String(row.start_date).slice(0, 10),
-      endDate: String(row.end_date).slice(0, 10),
-      totalSpots,
-      filledSpots: occupancy.confirmed,
-      activeHolds: occupancy.pending,
+      id: group.id,
+      listingId: group.listingId,
+      startDate: group.startDate,
+      endDate: group.endDate,
+      totalSpots: group.totalSpots,
+      filledSpots: group.confirmed,
+      activeHolds: group.pending,
       spotsRemaining,
       status: normalizedStatus,
       canJoin: normalizedStatus === "open" && spotsRemaining > 0,
@@ -236,5 +281,9 @@ export default async function handler(
     totalPricePence,
     groups,
     suggestedJoinGroupId: suggestedJoinGroup?.id ?? null,
+    reason:
+      conflictingOccupiedGroup && groups.length === 0
+        ? "These dates are already reserved for another shared stay."
+        : undefined,
   });
 }

@@ -416,7 +416,11 @@ export async function syncListingReviewSummary(
     })
     .eq("id", listingId);
 
-  if (error && !isMissingColumnError(error)) {
+  if (error && isMissingColumnError(error)) {
+    return;
+  }
+
+  if (error) {
     throw new ReviewRequestError(500, error.message || "Unable to update listing review summary.");
   }
 }

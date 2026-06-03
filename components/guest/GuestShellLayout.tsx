@@ -96,18 +96,18 @@ export function GuestShellLayout({ activeNav, title, children }: GuestShellLayou
     [normalizePath, router.asPath]
   );
 
-  const pageTitle = useMemo(() => title || "Guest dashboard", [title]);
+  const pageTitle = useMemo(() => title || "Trips", [title]);
 
   return (
     <div className="flex min-h-screen bg-slate-50">
       <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white px-4 pb-6 pt-4 lg:flex lg:flex-col">
         <div className="flex items-center gap-2 px-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-xs font-semibold text-white">
-            avy
+          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-xs font-semibold uppercase text-white">
+            fx
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-slate-900">Veloro</span>
-            <span className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Guest dashboard</span>
+            <span className="text-sm font-semibold text-slate-900">Flexivo</span>
+            <span className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Travelling</span>
           </div>
         </div>
 
@@ -144,7 +144,7 @@ export function GuestShellLayout({ activeNav, title, children }: GuestShellLayou
           })}
         </nav>
 
-        <div className="mt-4 text-xs text-slate-500">Signed in as guest.</div>
+        <div className="mt-4 text-xs text-slate-500">Travelling mode.</div>
       </aside>
 
       <div className="flex min-h-screen flex-1 flex-col">

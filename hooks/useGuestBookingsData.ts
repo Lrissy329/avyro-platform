@@ -5,6 +5,7 @@ import { ensureProfile } from "@/lib/ensureProfile";
 import { supabase } from "@/lib/supabaseClient";
 import {
   isMissingColumnError,
+  resolvePaymentStatus,
   resolveBookingCheckIn,
   sortBookingsByCheckIn,
   type GuestBookingRecord,
@@ -57,8 +58,12 @@ async function loadBookingsForGuest(guestId: string): Promise<GuestBookingRecord
 
     if (!error) {
       const rows = (Array.isArray(data) ? data : []) as unknown as GuestBookingRecord[];
+      const normalizedRows = rows.map((row) => ({
+        ...row,
+        status: resolvePaymentStatus(row.status, row.stripe_status),
+      }));
       return sortBookingsByCheckIn(
-        rows.filter(
+        normalizedRows.filter(
           (row) => typeof row.id === "string" && typeof row.listing_id === "string"
         )
       );

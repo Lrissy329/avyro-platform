@@ -1,14 +1,28 @@
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
+
 import { supabase } from "@/lib/supabaseClient";
+import {
+  getHostingHomeHref,
+  getTravellingHomeHref,
+  hasGuestAccess,
+  hasHostAccess,
+  persistActiveRole,
+  readStoredActiveRole,
+  resolveActiveRole,
+  resolvePrimaryRole,
+  type ActiveRole,
+} from "@/lib/roleMode";
 
 type Profile = {
   full_name: string | null;
   avatar_url: string | null;
   role_host: boolean;
   role_guest: boolean;
+  primary_role: string | null;
+  active_role: string | null;
 };
 
 type AppHeaderProps = {
@@ -20,12 +34,41 @@ type AppHeaderProps = {
 const cx = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(" ");
 
-const resolveDashboardHref = (profile: Profile | null) => {
-  if (!profile) return "/login";
-  if (profile.role_host) return "/host/dashboard";
-  if (profile.role_guest) return "/guest/dashboard";
-  return "/guest/dashboard";
+const normalizePath = (value: string) => {
+  const [withoutHash] = value.split("#");
+  const [withoutQuery] = withoutHash.split("?");
+  const trimmed = withoutQuery.replace(/\/+$/, "");
+  return trimmed || "/";
 };
+
+const TRAVELLING_NAV = [
+  { label: "Search", href: "/search" },
+  { label: "Trips", href: "/guest/dashboard" },
+  { label: "Payments", href: "/guest/payments" },
+  { label: "Messages", href: "/guest/messages" },
+];
+
+const HOSTING_NAV = [
+  { label: "Your places", href: "/host/listings" },
+  { label: "Calendar", href: "/host/calendar" },
+  { label: "Occupancy", href: "/host/guests" },
+  { label: "Earnings", href: "/host/payouts" },
+  { label: "Hosting insights", href: "/host/dashboard" },
+];
+
+async function resolveHostingDestination() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return "/login";
+
+  const { count } = await supabase
+    .from("listings")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+  return getHostingHomeHref((count ?? 0) > 0);
+}
 
 export function AppHeader({ notificationCount, onSignOut, initialProfile = null }: AppHeaderProps) {
   const router = useRouter();
@@ -33,9 +76,12 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
   const [profile, setProfile] = useState<Profile | null>(initialProfile);
   const [loadingProfile, setLoadingProfile] = useState(!initialProfile);
   const [signingOut, setSigningOut] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState<ActiveRole | null>(null);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    let active = true;
+
     (async () => {
       const {
         data: { session },
@@ -43,27 +89,20 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
       const user = session?.user;
 
       if (!user) {
+        if (!active) return;
         setProfile(null);
         setLoadingProfile(false);
         return;
       }
 
-      if (initialProfile) {
-        setProfile(initialProfile);
-        setLoadingProfile(false);
-        return;
-      }
-
+      const fallbackAvatar = user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? null;
       const { data } = await supabase
         .from("profiles")
-        .select("full_name, avatar_url, role_host, role_guest")
+        .select("full_name, avatar_url, role_host, role_guest, primary_role, active_role")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
-      const fallbackAvatar =
-        user.user_metadata?.avatar_url ??
-        user.user_metadata?.picture ??
-        null;
+      if (!active) return;
 
       setProfile(
         data
@@ -72,16 +111,24 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
               avatar_url: data.avatar_url ?? fallbackAvatar,
               role_host: Boolean(data.role_host),
               role_guest: Boolean(data.role_guest),
+              primary_role: data.primary_role ?? null,
+              active_role: data.active_role ?? null,
             }
           : {
               full_name: user.email ?? null,
               avatar_url: fallbackAvatar,
               role_host: false,
               role_guest: false,
+              primary_role: null,
+              active_role: null,
             }
       );
       setLoadingProfile(false);
     })();
+
+    return () => {
+      active = false;
+    };
   }, [initialProfile]);
 
   useEffect(() => {
@@ -99,12 +146,18 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
 
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleEscape);
-
     return () => {
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleEscape);
     };
   }, [menuOpen]);
+
+  const primaryRole = resolvePrimaryRole(profile);
+  const activeRole = resolveActiveRole(profile, readStoredActiveRole());
+  const canHost = hasHostAccess(profile);
+  const canGuest = hasGuestAccess(profile);
+  const contextLabel = activeRole === "host" ? "Hosting" : "Travelling";
+  const navItems = activeRole === "host" ? HOSTING_NAV : TRAVELLING_NAV;
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -123,13 +176,6 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
     }
   };
 
-  const normalizePath = (value: string) => {
-    const [withoutHash] = value.split("#");
-    const [withoutQuery] = withoutHash.split("?");
-    const trimmed = withoutQuery.replace(/\/+$/, "");
-    return trimmed || "/";
-  };
-
   const isSameRoute = (href: string) => normalizePath(router.asPath) === normalizePath(href);
 
   const go = (href: string) => {
@@ -139,20 +185,51 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
     setMenuOpen(false);
   };
 
+  const switchRole = async (nextRole: ActiveRole) => {
+    if (!profile || switchingRole) return;
+    setSwitchingRole(nextRole);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const userId = session?.user?.id;
+      if (!userId) {
+        router.push("/login");
+        return;
+      }
+
+      const { error } = await supabase.from("profiles").update({ active_role: nextRole }).eq("id", userId);
+      if (error) throw error;
+
+      persistActiveRole(nextRole);
+      setProfile((current) => (current ? { ...current, active_role: nextRole } : current));
+
+      const destination =
+        nextRole === "host" ? await resolveHostingDestination() : getTravellingHomeHref();
+      setMenuOpen(false);
+      if (!isSameRoute(destination)) {
+        router.push(destination).catch(() => null);
+      }
+    } catch (error) {
+      console.error("Unable to switch role", error);
+    } finally {
+      setSwitchingRole(null);
+    }
+  };
+
   const displayName =
     profile?.full_name?.trim() ||
     (router.isReady ? String(router.query?.email || "") : "") ||
-    "Guest";
+    "Member";
 
-  const initials = displayName
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "G";
-
-  const dashboardHref = resolveDashboardHref(profile);
-  const hostNavHref = profile?.role_host ? "/host/dashboard" : "/host/create-listing";
+  const initials =
+    displayName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "F";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
@@ -160,8 +237,9 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
         <button
           type="button"
           onClick={() => {
-            if (!isSameRoute("/")) {
-              router.push("/").catch(() => null);
+            const homeHref = activeRole === "host" ? "/host/dashboard" : "/";
+            if (!isSameRoute(homeHref)) {
+              router.push(homeHref).catch(() => null);
             }
           }}
           className="shrink-0 bg-transparent p-0 hover:bg-transparent focus-visible:outline-none"
@@ -178,28 +256,22 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
           />
         </button>
 
-        <div className="flex items-center gap-2 sm:gap-3">
-          <nav className="hidden items-center gap-6 md:flex">
+        <div className="hidden items-center gap-6 md:flex">
+          {navItems.map((item) => (
             <Link
-              href="/search"
+              key={item.href}
+              href={item.href}
               className={cx(
                 "text-sm font-medium text-slate-600 transition-colors duration-200 hover:text-slate-900",
-                router.pathname === "/search" && "text-slate-900"
+                normalizePath(router.asPath).startsWith(normalizePath(item.href)) && "text-slate-900"
               )}
             >
-              Stays
+              {item.label}
             </Link>
-            <Link
-              href={hostNavHref}
-              className={cx(
-                "text-sm font-medium text-slate-600 transition-colors duration-200 hover:text-slate-900",
-                router.pathname.startsWith("/host") && "text-slate-900"
-              )}
-            >
-              Host
-            </Link>
-          </nav>
+          ))}
+        </div>
 
+        <div className="flex items-center gap-2 sm:gap-3">
           {!profile ? (
             <Link
               href="/login"
@@ -209,25 +281,33 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
             </Link>
           ) : null}
 
-          <Link
-            href="/search"
-            className="group relative hidden h-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#FEDD02] px-4 text-sm font-semibold text-black shadow-md transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[#E6C902] hover:shadow-[0_8px_16px_rgba(201,176,2,0.32)] active:translate-y-0 active:scale-[0.99] active:bg-[#C9B002] focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40 sm:inline-flex"
-          >
-            <span className="relative z-10">Search stays</span>
-            <svg
-              viewBox="0 0 24 24"
-              aria-hidden
-              className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-0 transition-all duration-200 ease-out group-hover:opacity-100"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {profile && (canHost || canGuest) ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (activeRole === "host" && canGuest) {
+                  void switchRole("guest");
+                } else if (activeRole !== "host" && canHost) {
+                  void switchRole("host");
+                }
+              }}
+              disabled={Boolean(switchingRole)}
+              className="hidden rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:inline-flex"
             >
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-3.5-3.5" />
-            </svg>
-          </Link>
+              {switchingRole
+                ? "Switching…"
+                : activeRole === "host"
+                ? "Switch to Travelling"
+                : "Switch to Hosting"}
+            </button>
+          ) : (
+            <Link
+              href="/search"
+              className="group relative hidden h-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#FEDD02] px-4 text-sm font-semibold text-black shadow-md transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[#E6C902] hover:shadow-[0_8px_16px_rgba(201,176,2,0.32)] active:translate-y-0 active:scale-[0.99] active:bg-[#C9B002] focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40 sm:inline-flex"
+            >
+              <span className="relative z-10">Search stays</span>
+            </Link>
+          )}
 
           <div ref={dropdownRef} className="relative">
             <button
@@ -240,21 +320,17 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
             >
               <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-slate-100">
                 {profile?.avatar_url ? (
-                  <img
-                    src={profile.avatar_url}
-                    alt="Profile"
-                    className="h-full w-full object-cover"
-                  />
+                  <img src={profile.avatar_url} alt="Profile" className="h-full w-full object-cover" />
                 ) : loadingProfile ? (
                   <span className="h-full w-full animate-pulse bg-slate-200" />
                 ) : (
                   <span className="text-xs font-semibold text-slate-700">{initials}</span>
                 )}
-                {!!notificationCount && notificationCount > 0 && (
+                {!!notificationCount && notificationCount > 0 ? (
                   <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold text-white">
                     {notificationCount}
-                    </span>
-                )}
+                  </span>
+                ) : null}
               </span>
               <span className="hidden text-sm font-medium text-slate-700 sm:inline">
                 {profile ? displayName.split(" ")[0] : "Menu"}
@@ -262,9 +338,9 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
               <span className="text-xs text-slate-400">▾</span>
             </button>
 
-            {menuOpen && (
+            {menuOpen ? (
               <div
-                className="absolute right-0 top-full mt-3 w-[290px] overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-[0_18px_38px_rgba(15,23,42,0.14)]"
+                className="absolute right-0 top-full mt-3 w-[310px] overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-[0_18px_38px_rgba(15,23,42,0.14)]"
                 role="menu"
               >
                 {profile ? (
@@ -272,26 +348,73 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                     <div className="border-b border-slate-200 px-5 py-4">
                       <p className="text-[22px] font-semibold leading-none text-slate-900">{displayName}</p>
                       <p className="mt-1 text-sm text-slate-500">
-                        {profile.role_host ? "Host" : profile.role_guest ? "Guest" : "Member"}
+                        {primaryRole === "both" ? `${contextLabel} mode` : primaryRole === "host" ? "Hosting" : "Travelling"}
                       </p>
                     </div>
+
+                    {primaryRole === "both" ? (
+                      <div className="border-b border-slate-200 px-5 py-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                          Mode
+                        </p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void switchRole("guest")}
+                            disabled={Boolean(switchingRole)}
+                            className={cx(
+                              "rounded-2xl border px-3 py-3 text-left text-sm transition",
+                              activeRole === "guest"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                            )}
+                          >
+                            Switch to Travelling
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void switchRole("host")}
+                            disabled={Boolean(switchingRole)}
+                            className={cx(
+                              "rounded-2xl border px-3 py-3 text-left text-sm transition",
+                              activeRole === "host"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                            )}
+                          >
+                            Switch to Hosting
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
                     <nav className="py-1 text-[15px] text-slate-800">
-                      <ButtonMenuItem label="Dashboard" onClick={() => go(dashboardHref)} strong />
-                      <ButtonMenuItem label="Explore stays" onClick={() => go("/search")} />
-                      {profile.role_host ? (
-                        <ButtonMenuItem label="Host messages" onClick={() => go("/host/messages")} />
+                      {activeRole === "host" ? (
+                        <>
+                          <ButtonMenuItem label="Your places" onClick={() => go("/host/listings")} strong />
+                          <ButtonMenuItem label="Calendar" onClick={() => go("/host/calendar")} />
+                          <ButtonMenuItem label="Occupancy" onClick={() => go("/host/guests")} />
+                          <ButtonMenuItem label="Earnings" onClick={() => go("/host/payouts")} />
+                          <ButtonMenuItem label="Hosting insights" onClick={() => go("/host/dashboard")} />
+                          <ButtonMenuItem label="Profile" onClick={() => go("/host/profile")} />
+                        </>
                       ) : (
-                        <ButtonMenuItem label="Trips" onClick={() => go("/guest/dashboard")} />
+                        <>
+                          <ButtonMenuItem label="Search" onClick={() => go("/search")} strong />
+                          <ButtonMenuItem label="Trips" onClick={() => go("/guest/dashboard")} />
+                          <ButtonMenuItem label="Payments" onClick={() => go("/guest/payments")} />
+                          <ButtonMenuItem label="Messages" onClick={() => go("/guest/messages")} />
+                          <ButtonMenuItem label="Profile" onClick={() => go("/guest/profile")} />
+                        </>
                       )}
-                      <ButtonMenuItem label="Profile" onClick={() => go("/guest/profile")} />
-                      {!profile.role_host ? (
-                        <ButtonMenuItem label="Become a host" onClick={() => go("/host/create-listing")} />
+                      {!canHost ? (
+                        <ButtonMenuItem label="Host a place" onClick={() => go("/role-setup")} />
                       ) : null}
                       <hr className="my-1 border-slate-200" />
                       <ButtonMenuItem
                         label={signingOut ? "Signing out..." : "Log out"}
                         onClick={() => {
-                          handleSignOut();
+                          void handleSignOut();
                           setMenuOpen(false);
                         }}
                         disabled={signingOut}
@@ -301,17 +424,17 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                   </>
                 ) : (
                   <div className="py-1 text-[15px] text-slate-800">
-                    <div className="px-5 py-3 text-sm font-medium text-slate-700">Welcome to Veloro</div>
+                    <div className="px-5 py-3 text-sm font-medium text-slate-700">Welcome to Flexivo</div>
                     <div className="pb-1">
                       <ButtonMenuItem label="Log in or sign up" onClick={() => go("/login")} strong />
                       <hr className="my-1 border-slate-200" />
                       <ButtonMenuItem label="Search stays" onClick={() => go("/search")} />
-                      <ButtonMenuItem label="Become a host" onClick={() => go("/host/create-listing")} />
+                      <ButtonMenuItem label="Host a place" onClick={() => go("/role-setup")} />
                     </div>
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -327,22 +450,15 @@ type ButtonMenuItemProps = {
   strong?: boolean;
 };
 
-function ButtonMenuItem({
-  label,
-  onClick,
-  disabled,
-  danger,
-  strong,
-}: ButtonMenuItemProps) {
+function ButtonMenuItem({ label, onClick, disabled, danger, strong }: ButtonMenuItemProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       className={cx(
         "w-full px-5 py-3 text-left transition-colors duration-150",
-        danger
-          ? "text-red-600 hover:bg-red-50"
-          : "text-slate-800 hover:bg-slate-50",
+        danger ? "text-red-600 hover:bg-red-50" : "text-slate-800 hover:bg-slate-50",
         strong && !danger && "font-semibold text-slate-900",
         disabled && "cursor-not-allowed opacity-60"
       )}

@@ -12,6 +12,13 @@ if (!supabaseUrl || !serviceRoleKey) {
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
+const isPaidLikeStatus = (status?: string | null) =>
+  ["paid", "complete", "succeeded"].includes(String(status ?? "").toLowerCase());
+
+const isFinalizedBookingState = (status?: string | null, stripeStatus?: string | null) =>
+  ["confirmed", "paid", "completed"].includes(String(status ?? "").toLowerCase()) &&
+  isPaidLikeStatus(stripeStatus);
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -31,15 +38,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "Checkout session not found" });
     }
 
-    const paidStatuses = new Set(["paid", "complete"]);
-    const hasPaid = paidStatuses.has(session.payment_status ?? "") || paidStatuses.has(session.status ?? "");
-
-    if (!hasPaid) {
-      return res.status(409).json({ error: "Checkout session not paid yet" });
-    }
+    const paymentIntentStatus =
+      session.payment_intent && typeof session.payment_intent === "object"
+        ? (session.payment_intent as any)?.status
+        : null;
+    const hasPaid =
+      isPaidLikeStatus(session.payment_status ?? "") ||
+      isPaidLikeStatus(session.status ?? "") ||
+      isPaidLikeStatus(paymentIntentStatus);
 
     const metadata = session.metadata ?? {};
     if (isSharedGroupCheckoutSession(session as any)) {
+      if (!hasPaid) {
+        const metadataBookingId = String(metadata.booking_id ?? metadata.bookingId ?? "");
+        if (metadataBookingId) {
+          const { data: existingSharedBooking } = await supabaseAdmin
+            .from("bookings")
+            .select("id, status, stripe_status")
+            .eq("id", metadataBookingId)
+            .maybeSingle();
+          if (
+            existingSharedBooking?.id &&
+            isFinalizedBookingState(existingSharedBooking.status, existingSharedBooking.stripe_status)
+          ) {
+            return res.status(200).json({ success: true, bookingId: existingSharedBooking.id });
+          }
+        }
+        return res.status(409).json({ error: "Checkout session not paid yet" });
+      }
+
       const sharedResult = await finalizeSharedGroupCheckout({
         supabaseAdmin,
         session: session as any,
@@ -48,6 +75,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: sharedResult.error });
       }
       return res.status(200).json({ success: true, bookingId: sharedResult.bookingId });
+    }
+
+    if (!hasPaid) {
+      return res.status(409).json({ error: "Checkout session not paid yet" });
     }
 
     const bookingId = (metadata.booking_id ?? metadata.bookingId ?? null) as string | null;

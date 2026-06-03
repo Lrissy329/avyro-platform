@@ -13,6 +13,15 @@ import {
   type ListingPublicReview,
 } from "@/lib/reviewSystem";
 
+const ENABLE_SHARED_LISTING_DETAIL_DEBUG =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_DEBUG_SHARED_LISTING_DETAIL === "1";
+
+const debugLog = (payload: Record<string, unknown>) => {
+  if (!ENABLE_SHARED_LISTING_DETAIL_DEBUG) return;
+  console.log(`SHARED_LISTING_DETAIL_DEBUG\n${JSON.stringify(payload, null, 2)}`);
+};
+
 type LegacyListingReviewRow = {
   id: string;
   reviewer_id: string | null;
@@ -177,6 +186,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     await publishExpiredReviews(admin);
     const rows = await getPublishedGuestReviewsForListing(admin, listingId);
+    debugLog({
+      listing_id: listingId,
+      stage: "reviews_loaded",
+      review_rows: rows.length,
+    });
 
     if (rows.length > 0) {
       const summary = computeListingSummaryFromRows(rows);
@@ -203,6 +217,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       reviews: [],
     });
   } catch (error: any) {
+    debugLog({
+      listing_id: listingId,
+      stage: "reviews_failed",
+      error_message: error?.message ?? null,
+      error_code: error?.code ?? null,
+    });
     if (error instanceof ReviewRequestError) {
       if (error.code === "REVIEWS_TABLE_MISSING") {
         return res.status(200).json({

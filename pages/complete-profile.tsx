@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "@/lib/supabaseClient";
+import { buildRoleUpdates, getHostingHomeHref, getTravellingHomeHref, persistActiveRole, type PrimaryRole } from "@/lib/roleMode";
 
 export default function CompleteProfile() {
   const router = useRouter();
   const [fullName, setFullName] = useState("");
-  const [role, setRole] = useState<"guest" | "host" | "both" | "">("");
+  const [role, setRole] = useState<PrimaryRole | "">("");
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,21 +27,26 @@ export default function CompleteProfile() {
     e.preventDefault();
     if (!userId || !role) return;
 
-    const role_host = role === "host" || role === "both";
-    const role_guest = role === "guest" || role === "both";
+    const roleUpdates = buildRoleUpdates(role);
 
     const { error } = await supabase.from("profiles").upsert({
       id: userId,
       full_name: fullName,
-      role_guest,
-      role_host,
+      ...roleUpdates,
     });
 
     if (!error) {
-      if (role_host) {
-        router.push("/host/dashboard");
+      persistActiveRole(roleUpdates.active_role);
+      if (role === "both") {
+        router.push("/select-role");
+      } else if (role === "host") {
+        const { count } = await supabase
+          .from("listings")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId);
+        router.push(getHostingHomeHref((count ?? 0) > 0));
       } else {
-        router.push("/guest/dashboard");
+        router.push(getTravellingHomeHref());
       }
     } else {
       alert("Error saving profile.");

@@ -13,6 +13,7 @@ import {
   cleanupExpiredPendingSharedMembers,
   getSharedGroupOccupancy,
   isMissingSharedSchema,
+  listOverlappingSharedGroupsWithOccupancy,
 } from "@/lib/sharedGroupsDb";
 
 type CheckoutResponse =
@@ -25,6 +26,15 @@ type CheckoutResponse =
       error: string;
       code?: string;
     };
+
+const ENABLE_SHARED_CHECKOUT_URL_DEBUG =
+  process.env.NODE_ENV === "development" &&
+  process.env.NEXT_PUBLIC_DEBUG_SHARED_CHECKOUT === "1";
+
+const debugLog = (payload: Record<string, unknown>) => {
+  if (!ENABLE_SHARED_CHECKOUT_URL_DEBUG) return;
+  console.log(`SHARED_CHECKOUT_URL_DEBUG\n${JSON.stringify(payload, null, 2)}`);
+};
 
 const resolveOrigin = (req: NextApiRequest) => {
   const envOrigin = process.env.NEXT_PUBLIC_SITE_URL;
@@ -46,6 +56,61 @@ const isGroupFullError = (error: any) => {
   const message = String(error?.message ?? "").toUpperCase();
   return message.includes("SHARED_GROUP_FULL");
 };
+
+const isMissingBookingColumnError = (error: any) => {
+  const code = String(error?.code ?? "");
+  const message = String(error?.message ?? "").toLowerCase();
+  const details = String(error?.details ?? "").toLowerCase();
+  const combined = `${message} ${details}`;
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    (combined.includes("column") &&
+      (combined.includes("does not exist") ||
+        combined.includes("schema cache") ||
+        combined.includes("could not find")))
+  );
+};
+
+const extractMissingBookingColumns = (error: any): string[] => {
+  const texts = [
+    String(error?.message ?? ""),
+    String(error?.details ?? ""),
+    String(error?.hint ?? ""),
+  ];
+  const columns = new Set<string>();
+  const patterns = [
+    /could not find the ['"`]([a-z0-9_]+)['"`] column of ['"`]bookings['"`] in the schema cache/gi,
+    /column\s+bookings\.([a-z0-9_]+)\s+does not exist/gi,
+    /column\s+["'`]?([a-z0-9_]+)["'`]?\s+does not exist/gi,
+  ];
+
+  for (const text of texts) {
+    for (const pattern of patterns) {
+      let match = pattern.exec(text);
+      while (match) {
+        if (match[1]) columns.add(String(match[1]).toLowerCase());
+        match = pattern.exec(text);
+      }
+      pattern.lastIndex = 0;
+    }
+  }
+
+  return Array.from(columns);
+};
+
+const CRITICAL_SHARED_BOOKING_COLUMNS = new Set([
+  "listing_id",
+  "host_id",
+  "guest_id",
+  "status",
+  "check_in_time",
+  "check_out_time",
+  "currency",
+  "price_total",
+]);
+
+const toUtcStartIso = (dateOnly: string) => `${dateOnly}T00:00:00.000Z`;
 
 export default async function handler(
   req: NextApiRequest,
@@ -165,6 +230,33 @@ export default async function handler(
   const checkoutAction: "join" | "start" = action === "start" ? "start" : "join";
   let targetGroup: any = null;
 
+  if (checkoutAction === "start") {
+    try {
+      const overlappingGroups = await listOverlappingSharedGroupsWithOccupancy(supabase, {
+        listingId,
+        windowStart: checkIn,
+        windowEnd: checkOut,
+        statuses: ["open", "full", "closed"],
+        cleanupExpiredPending: true,
+      });
+      const conflictingOccupiedGroup = overlappingGroups.find(
+        (group) =>
+          group.confirmed > 0 &&
+          !(group.startDate === checkIn && group.endDate === checkOut)
+      );
+      if (conflictingOccupiedGroup) {
+        return res.status(409).json({
+          error: "These dates are already reserved for another shared stay.",
+          code: "SHARED_GROUP_RANGE_RESERVED",
+        });
+      }
+    } catch (error: any) {
+      if (!isMissingSharedSchema(error)) {
+        return res.status(500).json({ error: error?.message ?? "Failed to validate shared availability." });
+      }
+    }
+  }
+
   if (checkoutAction === "join") {
     if (sharedGroupId) {
       const groupResult = await supabase
@@ -283,7 +375,6 @@ export default async function handler(
     .select("id, status, reservation_expires_at")
     .eq("shared_group_id", targetGroupId)
     .eq("user_id", userId)
-    .in("status", ["pending", "confirmed"])
     .limit(1)
     .maybeSingle();
 
@@ -301,13 +392,6 @@ export default async function handler(
     });
   }
 
-  if (existingMembership?.status === "pending") {
-    await supabase
-      .from("shared_group_members")
-      .update({ status: "cancelled", updated_at: new Date().toISOString() })
-      .eq("id", existingMembership.id);
-  }
-
   const occupancyByGroup = await getSharedGroupOccupancy(supabase, [targetGroupId]);
   const occupancy = occupancyByGroup[targetGroupId] ?? { active: 0, confirmed: 0, pending: 0 };
   const groupTotalSpots = Math.max(1, toInt(targetGroup.total_spots ?? totalSpots, totalSpots, 1));
@@ -319,39 +403,136 @@ export default async function handler(
   }
 
   const reservationExpiresAt = addMinutesIso(SHARED_GROUP_PENDING_HOLD_MINUTES);
-  const memberInsert = await supabase
-    .from("shared_group_members")
-    .insert({
-      shared_group_id: targetGroupId,
-      user_id: userId,
-      status: "pending",
-      amount_paid_pence: 0,
-      reservation_expires_at: reservationExpiresAt,
-    })
-    .select("id")
-    .single();
+  const memberPayload = {
+    status: "pending",
+    amount_paid_pence: 0,
+    reservation_expires_at: reservationExpiresAt,
+    stripe_checkout_session_id: null,
+    stripe_payment_intent_id: null,
+    joined_at: null,
+    updated_at: new Date().toISOString(),
+  };
 
-  if (memberInsert.error) {
-    if (isGroupFullError(memberInsert.error)) {
-      return res.status(409).json({
-        error: "This shared group is now full.",
-        code: "SHARED_GROUP_FULL",
-      });
-    }
-    if (isMissingSharedSchema(memberInsert.error)) {
+  let sharedGroupMemberId: string;
+  if (existingMembership?.id) {
+    const memberReuse = await supabase
+      .from("shared_group_members")
+      .update(memberPayload)
+      .eq("id", existingMembership.id)
+      .select("id")
+      .single();
+
+    if (memberReuse.error) {
+      if (isGroupFullError(memberReuse.error)) {
+        return res.status(409).json({
+          error: "This shared group is now full.",
+          code: "SHARED_GROUP_FULL",
+        });
+      }
+      if (isMissingSharedSchema(memberReuse.error)) {
+        return res.status(500).json({
+          error: "Shared stay tables are not available yet. Run the latest migration first.",
+        });
+      }
       return res.status(500).json({
-        error: "Shared stay tables are not available yet. Run the latest migration first.",
+        error: memberReuse.error.message ?? "Unable to reserve a spot in this shared group.",
       });
     }
-    return res.status(500).json({
-      error: memberInsert.error.message ?? "Unable to reserve a spot in this shared group.",
-    });
-  }
 
-  const sharedGroupMemberId = String(memberInsert.data.id);
+    sharedGroupMemberId = String(memberReuse.data.id);
+  } else {
+    const memberInsert = await supabase
+      .from("shared_group_members")
+      .insert({
+        shared_group_id: targetGroupId,
+        user_id: userId,
+        ...memberPayload,
+      })
+      .select("id")
+      .single();
+
+    if (memberInsert.error) {
+      if (isGroupFullError(memberInsert.error)) {
+        return res.status(409).json({
+          error: "This shared group is now full.",
+          code: "SHARED_GROUP_FULL",
+        });
+      }
+      if (isMissingSharedSchema(memberInsert.error)) {
+        return res.status(500).json({
+          error: "Shared stay tables are not available yet. Run the latest migration first.",
+        });
+      }
+      return res.status(500).json({
+        error: memberInsert.error.message ?? "Unable to reserve a spot in this shared group.",
+      });
+    }
+
+    sharedGroupMemberId = String(memberInsert.data.id);
+  }
   const amountPence = perPersonWeeklyPricePence * weeksResult.weeks;
+  const provisionalBookingPayload = {
+    listing_id: String(listingId),
+    host_id: String(listing.user_id),
+    guest_id: String(userId),
+    status: "awaiting_payment",
+    payout_status: "pending",
+    stay_type: "nightly",
+    channel: "direct",
+    check_in_time: toUtcStartIso(checkIn),
+    check_out_time: toUtcStartIso(checkOut),
+    nights: weeksResult.weeks * 7,
+    guests_total: 1,
+    currency: "GBP",
+    price_total: amountPence / 100,
+    guest_total_pence: amountPence,
+    guest_unit_price_pence: weeksResult.weeks > 0 ? Math.round(amountPence / (weeksResult.weeks * 7)) : amountPence,
+    booking_type: "shared_group",
+    shared_group_id: targetGroupId,
+    stripe_status: "pending",
+  };
+  let provisionalBookingId: string | null = null;
+  let provisionalPayload: Record<string, any> = { ...provisionalBookingPayload };
+  let provisionalAttempts = 0;
+  const maxProvisionalAttempts = 20;
+  while (provisionalAttempts < maxProvisionalAttempts) {
+    const provisionalInsert = await supabase
+      .from("bookings")
+      .insert(provisionalPayload)
+      .select("id")
+      .single();
+    if (!provisionalInsert.error && provisionalInsert.data?.id) {
+      provisionalBookingId = String(provisionalInsert.data.id);
+      break;
+    }
+    if (
+      !provisionalInsert.error ||
+      (!isMissingSharedSchema(provisionalInsert.error) &&
+        !isMissingBookingColumnError(provisionalInsert.error))
+    ) {
+      break;
+    }
+    const missingColumns = extractMissingBookingColumns(provisionalInsert.error).filter((column) =>
+      Object.prototype.hasOwnProperty.call(provisionalPayload, column)
+    );
+    if (missingColumns.length === 0) {
+      break;
+    }
+    const missingCriticalColumns = missingColumns.filter((column) =>
+      CRITICAL_SHARED_BOOKING_COLUMNS.has(column)
+    );
+    if (missingCriticalColumns.length > 0) {
+      break;
+    }
+    missingColumns.forEach((column) => {
+      delete provisionalPayload[column];
+    });
+    provisionalAttempts += 1;
+  }
   const origin = resolveOrigin(req);
-  const successUrl = `${origin}/booking/success?session_id={CHECKOUT_SESSION_ID}`;
+  const successUrl = provisionalBookingId
+    ? `${origin}/booking/success?booking=${provisionalBookingId}&session_id={CHECKOUT_SESSION_ID}`
+    : `${origin}/booking/success?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${origin}/listing/${listingId}?payment=cancelled`;
 
   const session = await stripe.checkout.sessions.create({
@@ -386,6 +567,7 @@ export default async function handler(
       listing_id: String(listingId),
       host_id: String(listing.user_id),
       guest_id: String(userId),
+      booking_id: provisionalBookingId ?? "",
       booking_type: "shared_group",
       check_in: checkIn,
       check_out: checkOut,
@@ -396,8 +578,22 @@ export default async function handler(
       action: checkoutAction,
     },
   });
+  debugLog({
+    base_url: origin,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    session_id: session?.id ?? null,
+    metadata_keys: Object.keys(session?.metadata ?? {}),
+    booking_id: provisionalBookingId,
+  });
 
   if (!session?.url || !session.id) {
+    if (provisionalBookingId) {
+      await supabase
+        .from("bookings")
+        .update({ status: "cancelled", stripe_status: "cancelled" })
+        .eq("id", provisionalBookingId);
+    }
     await supabase
       .from("shared_group_members")
       .update({ status: "cancelled", updated_at: new Date().toISOString() })
@@ -419,6 +615,25 @@ export default async function handler(
     return res.status(500).json({
       error: updateMember.error.message ?? "Unable to store checkout session.",
     });
+  }
+
+  if (provisionalBookingId) {
+    const bookingSessionUpdate = await supabase
+      .from("bookings")
+      .update({
+        stripe_checkout_session_id: session.id,
+        stripe_payment_intent_id:
+          typeof session.payment_intent === "string" ? session.payment_intent : null,
+      })
+      .eq("id", provisionalBookingId);
+    if (bookingSessionUpdate.error && !isMissingSharedSchema(bookingSessionUpdate.error)) {
+      debugLog({
+        stage: "provisional_booking_session_update_failed",
+        booking_id: provisionalBookingId,
+        session_id: session.id,
+        error: bookingSessionUpdate.error,
+      });
+    }
   }
 
   return res.status(200).json({

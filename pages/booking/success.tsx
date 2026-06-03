@@ -123,16 +123,24 @@ export default function BookingSuccessPage() {
     if (!sessionId || typeof sessionId !== "string") return;
     setSyncState("syncing");
     const run = async () => {
+      const maxAttempts = 3;
       try {
-        const resp = await fetch(`/api/stripe/confirm-session?session_id=${sessionId}`);
-        const payload = await resp.json();
-        if (!resp.ok) {
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          const resp = await fetch(`/api/stripe/confirm-session?session_id=${sessionId}`);
+          const payload = await resp.json();
+          if (resp.ok) {
+            if (payload?.bookingId && typeof payload.bookingId === "string") {
+              setResolvedBookingId(payload.bookingId);
+            }
+            setSyncState("done");
+            return;
+          }
+          if (attempt < maxAttempts && resp.status >= 409) {
+            await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+            continue;
+          }
           throw new Error(payload?.error ?? "Failed to confirm payment.");
         }
-        if (payload?.bookingId && typeof payload.bookingId === "string") {
-          setResolvedBookingId(payload.bookingId);
-        }
-        setSyncState("done");
       } catch (err) {
         console.error("Failed to confirm checkout session", err);
         setSyncState("error");
@@ -331,7 +339,7 @@ export default function BookingSuccessPage() {
                 Syncing your booking status…
               </p>
             )}
-            {syncState === "error" && (
+            {syncState === "error" && !booking && (
               <p className="mt-2 text-xs text-[#E5484D]">
                 We couldn&apos;t verify the payment automatically. Your booking may take a moment to
                 update in the dashboard.

@@ -5,7 +5,11 @@ import dynamic from "next/dynamic";
 import MapListingCard from "@/components/MapListingCardV2";
 import SearchBar from "@/components/SearchBar";
 import { SharedStayFilter } from "@/components/shared-stay/SharedStayFilter";
-import { computeAllInPricing, computeRoundedGuestPricing } from "@/lib/pricing";
+import {
+  computeAllInPricing,
+  computeRoundedGuestPricing,
+  computeSharedPerPersonWeeklyPricePence,
+} from "@/lib/pricing";
 import { supabase } from "@/lib/supabaseClient";
 
 const MapView = dynamic(() => import("@/components/map"), { ssr: false });
@@ -167,6 +171,32 @@ type SearchListing = {
   sharedTotalSpots?: number | null;
   sharedWeeklyPricePence?: number | null;
   sharedSpotsRemaining?: number | null;
+};
+
+const getSharedPerPersonWeeklyPriceMajor = (listing: Partial<SearchListing>) => {
+  const sharedWeeklyPricePence = safeNumber(toNumber((listing as any).sharedWeeklyPricePence));
+  const sharedTotalSpots = Math.max(
+    1,
+    Math.round(Number((listing as any).sharedTotalSpots ?? 1)) || 1
+  );
+  if (sharedWeeklyPricePence == null || sharedWeeklyPricePence <= 0) return null;
+  return (
+    computeSharedPerPersonWeeklyPricePence({
+      totalWeeklyPricePence: sharedWeeklyPricePence,
+      totalSpots: sharedTotalSpots,
+    }).rounded_per_person_weekly_pence / 100
+  );
+};
+
+const getSearchPriceValue = (
+  listing: Partial<SearchListing>,
+  bookingUnit: "nightly" | "hourly"
+) => {
+  if (Boolean((listing as any).isSharedStay)) {
+    return getSharedPerPersonWeeklyPriceMajor(listing);
+  }
+  if (bookingUnit === "hourly") return safeNumber(listing.pricePerHour ?? null);
+  return safeNumber(listing.pricePerNight ?? null);
 };
 
 export default function SearchPage() {
@@ -371,6 +401,7 @@ export default function SearchPage() {
   const mapListings = useMemo(() => {
     return listings.map((listing) => {
       const bookingUnit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
+      const isSharedStay = Boolean(listing.isSharedStay);
       const unitCount =
         bookingUnit === "hourly"
           ? hasTimeSelection && stayHours > 0
@@ -379,15 +410,15 @@ export default function SearchPage() {
           : stayNights > 0
           ? stayNights
           : null;
-      const hostUnitPrice =
-        bookingUnit === "hourly" ? listing.pricePerHour ?? null : listing.pricePerNight ?? null;
+      const hostUnitPrice = getSearchPriceValue(listing, bookingUnit);
 
       if (hostUnitPrice == null || hostUnitPrice <= 0 || unitCount == null || unitCount <= 0) {
         return listing;
       }
 
-      const guestPriceForStay =
-        bookingUnit === "nightly" && Number.isInteger(unitCount) && unitCount >= 1
+      const guestPriceForStay = isSharedStay
+        ? hostUnitPrice * Math.max(1, Math.ceil(unitCount / 7))
+        : bookingUnit === "nightly" && Number.isInteger(unitCount) && unitCount >= 1
           ? computeRoundedGuestPricing({
               hostUnitPence: Math.round(hostUnitPrice * 100),
               units: unitCount,
@@ -400,7 +431,11 @@ export default function SearchPage() {
               isFirstCompletedBooking: false,
             }).guest_total_pence / 100;
 
-      return { ...listing, guestPriceForStay };
+      return {
+        ...listing,
+        guestPriceForStay,
+        guestPricePerNight: isSharedStay ? hostUnitPrice : undefined,
+      };
     });
   }, [hasTimeSelection, listings, stayHours, stayNights]);
   const draftPriceUnit = draftFilters.bookingUnit === "hourly" ? "hour" : "night";
@@ -427,17 +462,15 @@ export default function SearchPage() {
   }, [q]);
 
   const priceHistogram = useMemo(() => {
-    const unit = draftFilters.bookingUnit
-      ? draftFilters.bookingUnit
-      : q.bookingUnit === "hourly"
-      ? "hourly"
-      : "nightly";
+    const unit: "nightly" | "hourly" =
+      draftFilters.bookingUnit === "hourly"
+        ? "hourly"
+        : q.bookingUnit === "hourly"
+        ? "hourly"
+        : "nightly";
     const values = listings
       .map((listing) => {
-        const value =
-          unit === "hourly"
-            ? listing.pricePerHour ?? null
-            : listing.pricePerNight ?? null;
+        const value = getSearchPriceValue(listing, unit);
         return typeof value === "number" && Number.isFinite(value) ? value : null;
       })
       .filter((value): value is number => value !== null && value > 0);
@@ -483,7 +516,6 @@ export default function SearchPage() {
     const priceMin = Number(q.priceMin || 0);
     const priceMax = Number(q.priceMax || 999999);
     const bookingUnit = (q.bookingUnit || "").toLowerCase();
-    const priceColumn = bookingUnit === "hourly" ? "price_per_hour" : "price_per_night";
     const roomType = (q.roomType || "").trim();
     let guests = Number(q.adults || 0) + Number(q.children || 0);
     if (!guests && q.guests) {
@@ -559,8 +591,10 @@ export default function SearchPage() {
             .lte("longitude", boundsFilter.east);
         }
         if (wantedType) queryBuilder = queryBuilder.eq("type", wantedType);
-        if (!isNaN(priceMin)) queryBuilder = queryBuilder.gte(priceColumn, priceMin);
-        if (!isNaN(priceMax)) queryBuilder = queryBuilder.lte(priceColumn, priceMax);
+        if (bookingUnit === "hourly") {
+          if (!isNaN(priceMin)) queryBuilder = queryBuilder.gte("price_per_hour", priceMin);
+          if (!isNaN(priceMax)) queryBuilder = queryBuilder.lte("price_per_hour", priceMax);
+        }
         // MVP: keep public search scoped to nightly inventory.
         queryBuilder = queryBuilder.or("booking_unit.eq.nightly,booking_unit.is.null");
         if (toBool(q.shared_stays) === true) {
@@ -697,8 +731,8 @@ export default function SearchPage() {
             beds: l.beds ?? null,
             bathrooms: l.bathrooms ?? null,
             freeCancellation: Boolean((l as any).free_cancellation),
-            pricePerNight: Number(l.price_per_night ?? 0),
-            pricePerHour: l.price_per_hour != null ? Number(l.price_per_hour) : undefined,
+            pricePerNight: safeNumber(toNumber(l.price_per_night)) ?? undefined,
+            pricePerHour: safeNumber(toNumber(l.price_per_hour)) ?? undefined,
             booking_unit: (l.booking_unit as SearchListing["booking_unit"]) ?? null,
             thumbnail,
             distanceKmToAirport: commute.distanceKm,
@@ -725,6 +759,29 @@ export default function SearchPage() {
           };
         });
 
+        if (__DEV__) {
+          normalized
+            .filter((listing) => listing.isSharedStay)
+            .forEach((listing) => {
+              console.log(
+                "SEARCH_SHARED_LISTING_DEBUG\n" +
+                  JSON.stringify(
+                    {
+                      listing_id: listing.id,
+                      listing_type: "shared",
+                      coordinates: listing.coords ?? null,
+                      coords_missing: Boolean(listing.coordsMissing),
+                      shared_weekly_price_pence: listing.sharedWeeklyPricePence ?? null,
+                      shared_total_spots: listing.sharedTotalSpots ?? null,
+                      inclusion_stage: "normalized",
+                    },
+                    null,
+                    2
+                  )
+              );
+            });
+        }
+
         let filtered = normalized;
         if (!isTrivialLocation && !effectiveAirport) {
           const loc = locLower;
@@ -734,6 +791,34 @@ export default function SearchPage() {
             return city.includes(loc) || code.includes(loc) || (loc.length <= 3 && code === loc);
           });
         }
+
+        filtered = filtered.filter((listing) => {
+          const listingPrice = getSearchPriceValue(
+            listing,
+            bookingUnit === "hourly" ? "hourly" : "nightly"
+          );
+          if (listingPrice == null || !Number.isFinite(listingPrice) || listingPrice <= 0) {
+            if (__DEV__ && listing.isSharedStay) {
+              console.log(
+                "SEARCH_SHARED_LISTING_DEBUG\n" +
+                  JSON.stringify(
+                    {
+                      listing_id: listing.id,
+                      listing_type: "shared",
+                      inclusion_stage: "client_price_filter",
+                      inclusion_reason: "excluded_missing_price",
+                    },
+                    null,
+                    2
+                  )
+              );
+            }
+            return false;
+          }
+          if (!Number.isNaN(priceMin) && listingPrice < priceMin) return false;
+          if (!Number.isNaN(priceMax) && listingPrice > priceMax) return false;
+          return true;
+        });
 
         // Never show listings that are unavailable for the selected stay window.
         if (hasValidSelectedWindow && filtered.length > 0) {
@@ -800,16 +885,16 @@ export default function SearchPage() {
           if (sharedListingIds.length > 0) {
             const sharedGroupsResult = await supabase
               .from("shared_groups")
-              .select("id, listing_id, total_spots, status")
+              .select("id, listing_id, start_date, end_date, total_spots, status")
               .in("listing_id", sharedListingIds)
-              .eq("start_date", selectedCheckInDate)
-              .eq("end_date", selectedCheckOutDate)
-              .in("status", ["open", "full"]);
+              .in("status", ["open", "full", "closed"])
+              .lt("start_date", selectedCheckOutDate)
+              .gt("end_date", selectedCheckInDate);
 
             if (!sharedGroupsResult.error) {
               const sharedGroups = sharedGroupsResult.data ?? [];
               const groupIds = sharedGroups.map((row: any) => String(row.id)).filter(Boolean);
-              const occupancyByGroup: Record<string, number> = {};
+              const occupancyByGroup: Record<string, { confirmed: number; pending: number; active: number }> = {};
 
               if (groupIds.length > 0) {
                 const membersResult = await supabase
@@ -832,9 +917,13 @@ export default function SearchPage() {
                 membersRows.forEach((row: any) => {
                   const groupId = String(row?.shared_group_id ?? "");
                   if (!groupId) return;
+                  if (!occupancyByGroup[groupId]) {
+                    occupancyByGroup[groupId] = { confirmed: 0, pending: 0, active: 0 };
+                  }
                   const status = String(row?.status ?? "").toLowerCase();
                   if (status === "confirmed") {
-                    occupancyByGroup[groupId] = (occupancyByGroup[groupId] ?? 0) + 1;
+                    occupancyByGroup[groupId].confirmed += 1;
+                    occupancyByGroup[groupId].active += 1;
                     return;
                   }
                   if (status === "pending") {
@@ -842,23 +931,40 @@ export default function SearchPage() {
                       ? new Date(String(row.reservation_expires_at)).getTime()
                       : Number.POSITIVE_INFINITY;
                     if (Number.isFinite(expiresAt) && expiresAt <= nowMs) return;
-                    occupancyByGroup[groupId] = (occupancyByGroup[groupId] ?? 0) + 1;
+                    occupancyByGroup[groupId].pending += 1;
+                    occupancyByGroup[groupId].active += 1;
                   }
                 });
               }
 
               const listingRemaining: Record<string, number> = {};
-              const listingWithAnyGroup = new Set<string>();
+              const listingHasExactGroup = new Set<string>();
+              const listingHasOverlappingOccupiedGroup = new Set<string>();
               sharedGroups.forEach((group: any) => {
                 const listingId = String(group?.listing_id ?? "");
                 if (!listingId) return;
-                listingWithAnyGroup.add(listingId);
+                const isExactMatch =
+                  String(group?.start_date ?? "").slice(0, 10) === selectedCheckInDate &&
+                  String(group?.end_date ?? "").slice(0, 10) === selectedCheckOutDate;
                 const totalSpots = Math.max(1, Number(group?.total_spots ?? 1));
-                const occupied = occupancyByGroup[String(group.id)] ?? 0;
-                const remaining = Math.max(0, totalSpots - occupied);
-                const previous = listingRemaining[listingId];
-                if (previous == null || remaining > previous) {
-                  listingRemaining[listingId] = remaining;
+                const occupancy = occupancyByGroup[String(group.id)] ?? {
+                  confirmed: 0,
+                  pending: 0,
+                  active: 0,
+                };
+                if (!isExactMatch && occupancy.confirmed > 0) {
+                  listingHasOverlappingOccupiedGroup.add(listingId);
+                }
+                if (isExactMatch) {
+                  listingHasExactGroup.add(listingId);
+                  const normalizedStatus = String(group?.status ?? "").toLowerCase();
+                  const remaining = Math.max(0, totalSpots - occupancy.active);
+                  if (normalizedStatus === "open" && remaining > 0) {
+                    const previous = listingRemaining[listingId];
+                    if (previous == null || remaining > previous) {
+                      listingRemaining[listingId] = remaining;
+                    }
+                  }
                 }
               });
 
@@ -875,8 +981,10 @@ export default function SearchPage() {
               );
               filtered = filtered.filter((listing) => {
                 if (!listing.isSharedStay) return true;
-                if (!listingWithAnyGroup.has(listing.id)) return true;
-                return (listingRemaining[listing.id] ?? 0) > 0;
+                if (listingHasExactGroup.has(listing.id)) {
+                  return (listingRemaining[listing.id] ?? 0) > 0;
+                }
+                return !listingHasOverlappingOccupiedGroup.has(listing.id);
               });
             }
           }

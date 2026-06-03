@@ -34,12 +34,12 @@ type ConversationRow = {
 
 const navItems: Array<{ key: NavKey; label: string; href: string; section: "Main" | "Finance" | "Utility" }> =
   [
-    { key: "dashboard", label: "Dashboard", href: "/host/dashboard", section: "Main" },
+    { key: "dashboard", label: "Hosting insights", href: "/host/dashboard", section: "Main" },
     { key: "calendar", label: "Calendar", href: "/host/calendar", section: "Main" },
-    { key: "listings", label: "Listings", href: "/host/listings", section: "Main" },
+    { key: "listings", label: "Your places", href: "/host/listings", section: "Main" },
     { key: "messages", label: "Messages", href: "/host/messages", section: "Main" },
-    { key: "guests", label: "Guests", href: "/host/guests", section: "Main" },
-    { key: "payouts", label: "Payouts", href: "/host/payouts", section: "Finance" },
+    { key: "guests", label: "Occupancy", href: "/host/guests", section: "Main" },
+    { key: "payouts", label: "Earnings", href: "/host/payouts", section: "Finance" },
     { key: "profile", label: "Profile", href: "/host/profile", section: "Utility" },
     { key: "settings", label: "Settings", href: "/host/settings", section: "Utility" },
   ];
@@ -118,12 +118,12 @@ export function HostShellLayout({
     <div className="flex min-h-screen bg-slate-50">
       <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white px-4 pb-6 pt-4 lg:flex lg:flex-col">
         <div className="flex items-center gap-2 px-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-xs font-semibold text-white">
-            avy
+          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-xs font-semibold uppercase text-white">
+            fx
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-slate-900">Veloro</span>
-            <span className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Host dashboard</span>
+            <span className="text-sm font-semibold text-slate-900">Flexivo</span>
+            <span className="text-[11px] uppercase tracking-[0.14em] text-slate-400">Hosting</span>
           </div>
         </div>
 
@@ -236,9 +236,7 @@ export function HostShellLayout({
           </div>
         </nav>
 
-        <div className="mt-4 text-xs text-slate-500">
-          Signed in as host.
-        </div>
+        <div className="mt-4 text-xs text-slate-500">Hosting mode.</div>
       </aside>
 
       <div className="flex min-h-screen flex-1 flex-col">

@@ -42,6 +42,7 @@ export function GuestStayCard({
   const checkIn = resolveBookingCheckIn(booking);
   const checkOut = resolveBookingCheckOut(booking);
   const status = String(booking.status ?? "").toLowerCase();
+  const stripeStatus = booking.stripe_status ?? null;
   const nights = bookingNights(booking);
   const address = listing?.address?.trim() || listing?.location?.trim() || "";
 
@@ -76,8 +77,8 @@ export function GuestStayCard({
             ) : null}
           </p>
         </div>
-        <Badge className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClassName(status)}`}>
-          {mode === "current" ? "Current stay" : statusLabel(status)}
+        <Badge className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClassName(status, stripeStatus)}`}>
+          {mode === "current" ? "Current stay" : statusLabel(status, stripeStatus)}
         </Badge>
       </div>
 
@@ -114,7 +115,7 @@ export function GuestStayCard({
           Message host
         </Link>
 
-        {isAddressCopyAllowed(status) && address ? (
+        {isAddressCopyAllowed(status, stripeStatus) && address ? (
           <button
             type="button"
             onClick={handleCopyAddress}

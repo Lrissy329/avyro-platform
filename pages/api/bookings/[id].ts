@@ -10,6 +10,18 @@ if (!supabaseUrl || !serviceRoleKey) {
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
+const normalizeBookingStatus = (status?: string | null, stripeStatus?: string | null) => {
+  const normalizedStatus = String(status ?? "").toLowerCase();
+  const normalizedStripeStatus = String(stripeStatus ?? "").toLowerCase();
+  if (
+    ["paid", "succeeded", "complete"].includes(normalizedStripeStatus) &&
+    ["awaiting_payment", "approved", "pending", "payment_failed"].includes(normalizedStatus)
+  ) {
+    return "confirmed";
+  }
+  return status ?? null;
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -28,6 +40,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       listing_id,
       status,
       payout_status,
+      stripe_status,
       check_in_time,
       check_out_time,
       stay_type,
@@ -64,6 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const booking = {
     ...data,
+    status: normalizeBookingStatus((data as any).status, (data as any).stripe_status),
     check_in: data.check_in_time,
     check_out: data.check_out_time,
     listing,

@@ -87,8 +87,8 @@ export default function GuestPaymentsPage() {
                         {formatMoney(amountMajor, currency)}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClassName(booking.status)}`}>
-                          {statusLabel(booking.status)}
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClassName(booking.status, booking.stripe_status)}`}>
+                          {statusLabel(booking.status, booking.stripe_status)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{formatDate(booking.created_at)}</td>

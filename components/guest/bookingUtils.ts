@@ -103,6 +103,22 @@ const statusStyles: Record<string, string> = {
   refunded: "bg-rose-50 text-rose-700 border-rose-200",
 };
 
+export const resolvePaymentStatus = (
+  status?: string | null,
+  stripeStatus?: string | null
+): string => {
+  const key = String(status ?? "").toLowerCase();
+  const stripeKey = String(stripeStatus ?? "").toLowerCase();
+  const hasPaidStripeState = ["paid", "succeeded", "complete"].includes(stripeKey);
+
+  if (hasPaidStripeState) {
+    if (key === "confirmed" || key === "completed") return key;
+    return "paid";
+  }
+
+  return key;
+};
+
 export const isMissingColumnError = (error: any) => {
   const code = String(error?.code ?? "");
   const message = String(error?.message ?? "").toLowerCase();
@@ -165,13 +181,13 @@ export const groupGuestBookings = (
   return { current, upcoming, past };
 };
 
-export const statusLabel = (status?: string | null): string => {
-  const key = String(status ?? "").toLowerCase();
+export const statusLabel = (status?: string | null, stripeStatus?: string | null): string => {
+  const key = resolvePaymentStatus(status, stripeStatus);
   return statusLabels[key] ?? (key ? key.replace(/_/g, " ") : "Unknown");
 };
 
-export const statusClassName = (status?: string | null): string => {
-  const key = String(status ?? "").toLowerCase();
+export const statusClassName = (status?: string | null, stripeStatus?: string | null): string => {
+  const key = resolvePaymentStatus(status, stripeStatus);
   return statusStyles[key] ?? "bg-slate-100 text-slate-600 border-slate-200";
 };
 
@@ -207,17 +223,17 @@ export const bookingReference = (bookingId?: string | null): string => {
   return `BK-${bookingId.slice(-6).toUpperCase()}`;
 };
 
-export const isAddressCopyAllowed = (status?: string | null) => {
-  const key = String(status ?? "").toLowerCase();
+export const isAddressCopyAllowed = (status?: string | null, stripeStatus?: string | null) => {
+  const key = resolvePaymentStatus(status, stripeStatus);
   return key === "confirmed" || key === "paid" || key === "completed";
 };
 
-export const isAwaitingPayment = (status?: string | null) => {
-  const key = String(status ?? "").toLowerCase();
+export const isAwaitingPayment = (status?: string | null, stripeStatus?: string | null) => {
+  const key = resolvePaymentStatus(status, stripeStatus);
   return key === "awaiting_payment" || key === "approved" || key === "payment_failed";
 };
 
-export const canGuestCancel = (status?: string | null) => {
-  const key = String(status ?? "").toLowerCase();
+export const canGuestCancel = (status?: string | null, stripeStatus?: string | null) => {
+  const key = resolvePaymentStatus(status, stripeStatus);
   return key === "pending" || key === "awaiting_payment" || key === "approved" || key === "confirmed";
 };

@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 
 import GuestProfileCompletionCard from "@/components/profile/GuestProfileCompletionCard";
 import GuestProfilePanel from "@/components/profile/GuestProfilePanel";
+import GuestProfilePreviewCard from "@/components/profile/GuestProfilePreviewCard";
 import GuestVerificationPanel from "@/components/profile/GuestVerificationPanel";
 import ProfileHeader, { type ProfileHeaderProfile } from "@/components/profile/ProfileHeader";
 import { ensureProfile } from "@/lib/ensureProfile";
@@ -187,7 +188,27 @@ export default function GuestProfilePage() {
 
             <div className="grid gap-8 xl:grid-cols-[minmax(0,1.5fr)_380px]">
               <GuestProfilePanel profile={profile} onSave={handleSaveGuestProfile} />
-              <GuestProfileCompletionCard items={completionItems} />
+              <div className="space-y-6">
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-slate-900">Public preview</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    This is the profile summary hosts see before accepting a booking.
+                  </p>
+                  <div className="mt-4">
+                    <GuestProfilePreviewCard
+                      profile={profile}
+                      emailVerified={emailVerified}
+                      showProfessionalPlaceholder
+                      meta={
+                        <p className="text-xs text-slate-500">
+                          Sensitive details stay private. Hosts only see your public guest profile.
+                        </p>
+                      }
+                    />
+                  </div>
+                </section>
+                <GuestProfileCompletionCard items={completionItems} />
+              </div>
             </div>
 
             <GuestVerificationPanel emailVerified={emailVerified} />

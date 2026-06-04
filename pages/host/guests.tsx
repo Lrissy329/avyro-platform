@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
+import GuestProfilePreviewCard from "@/components/profile/GuestProfilePreviewCard";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -58,7 +58,8 @@ type HostBookingRow = {
 type GuestProfile = {
   id: string;
   full_name: string | null;
-  email: string | null;
+  headline?: string | null;
+  bio?: string | null;
   avatar_url: string | null;
   verification_level: number | null;
   verification_status: string | null;
@@ -189,7 +190,7 @@ export default function HostGuestsPage() {
     if (guestIds.length > 0) {
       const { data: guestRows, error: guestError } = await supabase
         .from("profiles")
-        .select("id, full_name, email, avatar_url, verification_level, verification_status")
+        .select("id, full_name, headline, bio, avatar_url, verification_level, verification_status")
         .in("id", guestIds);
 
       if (!guestError && guestRows) {
@@ -276,17 +277,17 @@ export default function HostGuestsPage() {
         label: guest?.full_name ?? "Guest",
         color: "#0f172a",
         source: "booking",
-        meta: {
-          kind: "booking",
-          status: (booking.status ?? "awaiting_payment") as BookingStatus,
-          total: totalMajor ?? null,
-          currency: booking.currency ?? "GBP",
-          nights: Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000)),
-          guestName: guest?.full_name ?? "Guest",
-          guestEmail: guest?.email ?? null,
-          listingName: listingTitle ?? null,
-          guests: booking.guests_total ?? null,
-        },
+          meta: {
+            kind: "booking",
+            status: (booking.status ?? "awaiting_payment") as BookingStatus,
+            total: totalMajor ?? null,
+            currency: booking.currency ?? "GBP",
+            nights: Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000)),
+            guestName: guest?.full_name ?? "Guest",
+            guestEmail: null,
+            listingName: listingTitle ?? null,
+            guests: booking.guests_total ?? null,
+          },
       };
       setDrawerEvent(event);
       setDrawerOpen(true);
@@ -488,33 +489,35 @@ export default function HostGuestsPage() {
                     key={booking.id}
                     className="grid grid-cols-[1.6fr_1.1fr_1fr_0.9fr_1.2fr] gap-4 border-b border-slate-100 px-6 py-3 text-sm hover:bg-slate-50"
                   >
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10 border border-slate-200">
-                        <AvatarImage
-                          src={guestProfile?.avatar_url ?? ""}
-                          alt={guestProfile?.full_name ?? "Guest"}
-                        />
-                        <AvatarFallback>
-                          {(guestProfile?.full_name || guestProfile?.email || "G").slice(0, 2).toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">
-                          {guestProfile?.full_name ?? "Guest"}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                          <span>{listing?.title ?? "Listing"}</span>
-                          <Badge className={`rounded-full border px-2 py-0.5 text-[10px] ${verificationClass}`}>
-                            {verification === "verified" && "Verified"}
-                            {verification === "pending" && "Pending"}
-                            {verification === "rejected" && "Rejected"}
-                            {verification === "unverified" && "Unverified"}
-                          </Badge>
-                        </div>
-                        {latestNote ? (
-                          <p className="mt-1 text-[11px] text-slate-400 line-clamp-1">Note: {latestNote}</p>
-                        ) : null}
-                      </div>
+                    <div className="min-w-0">
+                      <GuestProfilePreviewCard
+                        compact
+                        profile={guestProfile}
+                        secondaryBadge={{
+                          label:
+                            verification === "verified"
+                              ? "Verified"
+                              : verification === "pending"
+                              ? "Pending"
+                              : verification === "rejected"
+                              ? "Rejected"
+                              : "Unverified",
+                          tone:
+                            verification === "verified"
+                              ? "verified"
+                              : verification === "pending"
+                              ? "pending"
+                              : verification === "rejected"
+                              ? "rejected"
+                              : "default",
+                        }}
+                        meta={
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                            <span>{listing?.title ?? "Listing"}</span>
+                            {latestNote ? <span className="line-clamp-1">Note: {latestNote}</span> : null}
+                          </div>
+                        }
+                      />
                     </div>
 
                     <div className="text-sm text-slate-600">

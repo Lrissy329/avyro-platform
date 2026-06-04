@@ -5,11 +5,11 @@ import { useRouter } from "next/router";
 import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
+import GuestProfilePreviewCard from "@/components/profile/GuestProfilePreviewCard";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { supabase } from "@/lib/supabaseClient";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { ReviewFormModal } from "@/components/reviews/ReviewFormModal";
@@ -53,11 +53,11 @@ type ListingRow = {
 type GuestProfile = {
   id: string;
   full_name: string | null;
-  email: string | null;
+  headline?: string | null;
+  bio?: string | null;
   avatar_url: string | null;
   verification_level: number | null;
   verification_status: string | null;
-  phone?: string | null;
 };
 
 type PageProps = {
@@ -128,14 +128,6 @@ const resolveVerification = (profile?: GuestProfile | null) => {
   return "unverified";
 };
 
-const maskEmail = (email?: string | null) => {
-  if (!email) return "—";
-  const [user, domain] = email.split("@");
-  if (!domain) return email;
-  if (user.length <= 2) return `${user[0]}*@${domain}`;
-  return `${user[0]}***${user[user.length - 1]}@${domain}`;
-};
-
 export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => {
   const supabase = createPagesServerClient(ctx);
   const {
@@ -201,8 +193,8 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
   let guest: GuestProfile | null = null;
   if (bookingRow.guest_id) {
     const guestSelects = [
-      "id, full_name, email, avatar_url, verification_level, verification_status, phone",
-      "id, full_name, email, avatar_url, verification_level, verification_status",
+      "id, full_name, headline, bio, avatar_url, verification_level, verification_status",
+      "id, full_name, avatar_url, verification_level, verification_status",
     ];
     for (const select of guestSelects) {
       const { data: guestRow, error: guestError } = await admin
@@ -611,28 +603,33 @@ export default function HostBookingDetailPage({
                   Message guest
                 </Button>
               </div>
-              <div className="mt-4 flex items-center gap-3">
-                <Avatar className="h-12 w-12 border border-slate-200">
-                  <AvatarImage src={guest?.avatar_url ?? ""} alt={guest?.full_name ?? "Guest"} />
-                  <AvatarFallback>
-                    {(guest?.full_name || guest?.email || "G").slice(0, 2).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">{guest?.full_name ?? "Guest"}</p>
-                  <p className="text-xs text-slate-500">{maskEmail(guest?.email)}</p>
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Badge className={`rounded-full border px-3 py-1 text-xs font-semibold ${verificationClass}`}>
-                  {verification === "verified" && "Verified"}
-                  {verification === "pending" && "Pending"}
-                  {verification === "rejected" && "Rejected"}
-                  {verification === "unverified" && "Unverified"}
-                </Badge>
-                {guest?.phone ? (
-                  <span className="text-xs text-slate-500">Phone: {guest.phone}</span>
-                ) : null}
+              <div className="mt-4">
+                <GuestProfilePreviewCard
+                  profile={guest}
+                  secondaryBadge={{
+                    label:
+                      verification === "verified"
+                        ? "Verified"
+                        : verification === "pending"
+                        ? "Pending"
+                        : verification === "rejected"
+                        ? "Rejected"
+                        : "Unverified",
+                    tone:
+                      verification === "verified"
+                        ? "verified"
+                        : verification === "pending"
+                        ? "pending"
+                        : verification === "rejected"
+                        ? "rejected"
+                        : "default",
+                  }}
+                  meta={
+                    <p className="text-xs text-slate-500">
+                      Hosts only see public profile details that help assess the stay fit.
+                    </p>
+                  }
+                />
               </div>
             </Card>
 
@@ -790,7 +787,7 @@ export default function HostBookingDetailPage({
           onOpenChange={setReviewModalOpen}
           bookingId={booking.id}
           mode="host_to_guest"
-          subjectLabel={guest?.full_name ?? guest?.email ?? "guest"}
+          subjectLabel={guest?.full_name ?? "guest"}
           onSubmitted={() => {
             loadReviewEligibility().catch(() => null);
           }}

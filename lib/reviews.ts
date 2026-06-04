@@ -1,10 +1,9 @@
 export type ReviewCategoryKey =
   | "cleanliness"
   | "accuracy"
-  | "comfort"
+  | "communication"
   | "location"
-  | "value"
-  | "host";
+  | "value";
 
 export type ReviewCategory = {
   key: ReviewCategoryKey;
@@ -22,19 +21,9 @@ export type ReviewSummary = {
 const CATEGORY_LABELS: Record<ReviewCategoryKey, string> = {
   cleanliness: "Cleanliness",
   accuracy: "Accuracy",
-  comfort: "Comfort & rest quality",
-  location: "Location & access",
+  communication: "Communication",
+  location: "Location",
   value: "Value",
-  host: "Host reliability",
-};
-
-const CATEGORY_WEIGHTS: Record<ReviewCategoryKey, number> = {
-  cleanliness: 1,
-  accuracy: 1,
-  comfort: 2,
-  location: 1,
-  value: 1,
-  host: 1,
 };
 
 const clampScore = (value: number) => Math.min(10, Math.max(0, value));
@@ -49,12 +38,9 @@ export const formatReviewLabel = (score: number): string | null => {
 
 export const computeOverallScore = (scores: Record<ReviewCategoryKey, number>): number => {
   const entries = Object.entries(scores) as Array<[ReviewCategoryKey, number]>;
-  const totalWeight = entries.reduce((sum, [key]) => sum + CATEGORY_WEIGHTS[key], 0);
-  const weighted = entries.reduce(
-    (sum, [key, value]) => sum + clampScore(value) * CATEGORY_WEIGHTS[key],
-    0
-  );
-  const raw = totalWeight ? weighted / totalWeight : 0;
+  const raw = entries.length
+    ? entries.reduce((sum, [, value]) => sum + clampScore(value), 0) / entries.length
+    : 0;
   return Number(raw.toFixed(1));
 };
 
@@ -81,10 +67,9 @@ export const getFallbackReviewSummary = (): ReviewSummary =>
     {
       cleanliness: 9.4,
       accuracy: 9.1,
-      comfort: 9.6,
+      communication: 9.5,
       location: 8.9,
       value: 9.0,
-      host: 9.3,
     },
     25
   );

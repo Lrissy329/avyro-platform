@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { computeOverallScore } from "@/lib/reviews";
 
 type ReviewMode = "guest_to_host" | "host_to_guest";
 
@@ -102,9 +103,7 @@ export function ReviewFormModal({
         { key: "accuracy", label: "Accuracy" },
         { key: "cleanliness", label: "Cleanliness" },
         { key: "communication", label: "Communication" },
-        { key: "checkin", label: "Check-in" },
-        { key: "noise", label: "Noise / rest quality" },
-        { key: "transport", label: "Transport access" },
+        { key: "transport", label: "Location" },
         { key: "value", label: "Value" },
       ] as const;
     }
@@ -115,6 +114,18 @@ export function ReviewFormModal({
       { key: "punctuality", label: "Punctuality" },
     ] as const;
   }, [isGuestFlow]);
+
+  const derivedGuestOverall = useMemo(
+    () =>
+      computeOverallScore({
+        cleanliness: scores.cleanliness,
+        accuracy: scores.accuracy,
+        communication: scores.communication,
+        location: scores.transport,
+        value: scores.value,
+      }),
+    [scores.cleanliness, scores.accuracy, scores.communication, scores.transport, scores.value]
+  );
 
   const submit = async () => {
     if (!bookingId) {
@@ -128,7 +139,7 @@ export function ReviewFormModal({
     const payload: Record<string, unknown> = {
       bookingId,
       reviewType: mode,
-      overallScore: scores.overall,
+      overallScore: isGuestFlow ? Math.round(derivedGuestOverall) : scores.overall,
       communicationScore: scores.communication,
       cleanlinessScore: scores.cleanliness,
       publicComment,
@@ -137,8 +148,6 @@ export function ReviewFormModal({
 
     if (isGuestFlow) {
       payload.accuracyScore = scores.accuracy;
-      payload.checkinScore = scores.checkin;
-      payload.noiseScore = scores.noise;
       payload.transportScore = scores.transport;
       payload.valueScore = scores.value;
       payload.wouldStayAgain = wouldStayAgain;
@@ -188,12 +197,27 @@ export function ReviewFormModal({
         <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-sm font-semibold text-slate-900">Step 1 · Overall</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <ScoreField
-              id="review-overall-score"
-              label="Overall score"
-              value={scores.overall}
-              onChange={(value) => setScores((prev) => ({ ...prev, overall: value }))}
-            />
+            {isGuestFlow ? (
+              <div className="space-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  Overall score
+                </span>
+                <div className="text-lg font-semibold text-slate-900">
+                  {derivedGuestOverall.toFixed(1)}
+                  <span className="ml-1 text-sm font-medium text-slate-500">/ 10</span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Calculated from cleanliness, accuracy, communication, location, and value.
+                </p>
+              </div>
+            ) : (
+              <ScoreField
+                id="review-overall-score"
+                label="Overall score"
+                value={scores.overall}
+                onChange={(value) => setScores((prev) => ({ ...prev, overall: value }))}
+              />
+            )}
 
             <div className="space-y-1">
               <span className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
@@ -299,4 +323,3 @@ export function ReviewFormModal({
     </Dialog>
   );
 }
-

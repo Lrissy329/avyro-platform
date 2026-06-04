@@ -18,9 +18,7 @@ export type ListingReviewAverages = {
   accuracy: number;
   cleanliness: number;
   communication: number;
-  checkin: number;
-  noise: number;
-  transport: number;
+  location: number;
   value: number;
 };
 
@@ -120,10 +118,19 @@ const zeroAverages = (): ListingReviewAverages => ({
   accuracy: 0,
   cleanliness: 0,
   communication: 0,
-  checkin: 0,
-  noise: 0,
-  transport: 0,
+  location: 0,
   value: 0,
+});
+
+const getListingCategoryScores = (row: Pick<
+  ReviewRow,
+  "accuracy_score" | "cleanliness_score" | "communication_score" | "transport_score" | "value_score"
+>) => ({
+  cleanliness: parseScore(row.cleanliness_score) ?? 0,
+  accuracy: parseScore(row.accuracy_score) ?? 0,
+  communication: parseScore(row.communication_score) ?? 0,
+  location: parseScore(row.transport_score) ?? 0,
+  value: parseScore(row.value_score) ?? 0,
 });
 
 const roundOne = (value: number) => Number(value.toFixed(1));
@@ -320,9 +327,7 @@ export function computeListingSummaryFromRows(rows: ReviewRow[]): ListingReviewS
     accuracy: 0,
     cleanliness: 0,
     communication: 0,
-    checkin: 0,
-    noise: 0,
-    transport: 0,
+    location: 0,
     value: 0,
   };
 
@@ -330,14 +335,19 @@ export function computeListingSummaryFromRows(rows: ReviewRow[]): ListingReviewS
   let wouldStayAgainTotal = 0;
 
   rows.forEach((row) => {
-    totals.overall += parseScore(row.overall_score) ?? 0;
-    totals.accuracy += parseScore(row.accuracy_score) ?? 0;
-    totals.cleanliness += parseScore(row.cleanliness_score) ?? 0;
-    totals.communication += parseScore(row.communication_score) ?? 0;
-    totals.checkin += parseScore(row.checkin_score) ?? 0;
-    totals.noise += parseScore(row.noise_score) ?? 0;
-    totals.transport += parseScore(row.transport_score) ?? 0;
-    totals.value += parseScore(row.value_score) ?? 0;
+    const scores = getListingCategoryScores(row);
+    totals.overall +=
+      (scores.cleanliness +
+        scores.accuracy +
+        scores.communication +
+        scores.location +
+        scores.value) /
+      5;
+    totals.accuracy += scores.accuracy;
+    totals.cleanliness += scores.cleanliness;
+    totals.communication += scores.communication;
+    totals.location += scores.location;
+    totals.value += scores.value;
 
     if (typeof row.would_stay_again === "boolean") {
       wouldStayAgainTotal += 1;
@@ -351,9 +361,7 @@ export function computeListingSummaryFromRows(rows: ReviewRow[]): ListingReviewS
     accuracy: roundOne(totals.accuracy / count),
     cleanliness: roundOne(totals.cleanliness / count),
     communication: roundOne(totals.communication / count),
-    checkin: roundOne(totals.checkin / count),
-    noise: roundOne(totals.noise / count),
-    transport: roundOne(totals.transport / count),
+    location: roundOne(totals.location / count),
     value: roundOne(totals.value / count),
   };
 
@@ -393,7 +401,18 @@ export async function toListingPublicReviews(
     bookingId: row.booking_id,
     reviewerId: row.reviewer_id,
     reviewerName: profileNameMap[row.reviewer_id] ?? null,
-    overallScore: parseScore(row.overall_score) ?? 0,
+    overallScore: roundOne(
+      (() => {
+        const scores = getListingCategoryScores(row);
+        return (
+          scores.cleanliness +
+          scores.accuracy +
+          scores.communication +
+          scores.location +
+          scores.value
+        ) / 5;
+      })()
+    ),
     publicComment: sanitizeOptionalText(row.public_comment, PUBLIC_COMMENT_MAX),
     createdAt: row.created_at ?? null,
     publishedAt: row.published_at ?? null,
@@ -572,8 +591,6 @@ export async function createReviewSubmission(params: {
     accuracyScore = requireScore(input.accuracyScore, "accuracyScore");
     cleanlinessScore = requireScore(input.cleanlinessScore, "cleanlinessScore");
     communicationScore = requireScore(input.communicationScore, "communicationScore");
-    checkinScore = requireScore(input.checkinScore, "checkinScore");
-    noiseScore = requireScore(input.noiseScore, "noiseScore");
     transportScore = requireScore(input.transportScore, "transportScore");
     valueScore = requireScore(input.valueScore, "valueScore");
     if (typeof input.wouldStayAgain !== "boolean") {

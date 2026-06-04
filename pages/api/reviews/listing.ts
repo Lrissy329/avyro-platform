@@ -43,9 +43,7 @@ const emptySummary = (): ListingReviewSummary => ({
     accuracy: 0,
     cleanliness: 0,
     communication: 0,
-    checkin: 0,
-    noise: 0,
-    transport: 0,
+    location: 0,
     value: 0,
   },
   wouldStayAgainPct: null,
@@ -85,9 +83,7 @@ async function getLegacyPublishedListingReviews(
     accuracy: 0,
     cleanliness: 0,
     communication: 0,
-    checkin: 0,
-    noise: 0,
-    transport: 0,
+    location: 0,
     value: 0,
   };
 
@@ -95,18 +91,15 @@ async function getLegacyPublishedListingReviews(
     const mapped = {
       cleanliness: asNumber(row.cleanliness),
       accuracy: asNumber(row.accuracy),
-      comfort: asNumber(row.comfort),
+      communication: asNumber(row.host),
       location: asNumber(row.location),
       value: asNumber(row.value),
-      host: asNumber(row.host),
     };
     totals.overall += computeOverallScore(mapped);
     totals.accuracy += mapped.accuracy;
     totals.cleanliness += mapped.cleanliness;
-    totals.communication += mapped.host;
-    totals.checkin += mapped.host;
-    totals.noise += mapped.comfort;
-    totals.transport += mapped.location;
+    totals.communication += mapped.communication;
+    totals.location += mapped.location;
     totals.value += mapped.value;
   });
 
@@ -118,9 +111,7 @@ async function getLegacyPublishedListingReviews(
       accuracy: roundOne(totals.accuracy / count),
       cleanliness: roundOne(totals.cleanliness / count),
       communication: roundOne(totals.communication / count),
-      checkin: roundOne(totals.checkin / count),
-      noise: roundOne(totals.noise / count),
-      transport: roundOne(totals.transport / count),
+      location: roundOne(totals.location / count),
       value: roundOne(totals.value / count),
     },
     wouldStayAgainPct: null,
@@ -151,10 +142,9 @@ async function getLegacyPublishedListingReviews(
     overallScore: computeOverallScore({
       cleanliness: asNumber(row.cleanliness),
       accuracy: asNumber(row.accuracy),
-      comfort: asNumber(row.comfort),
+      communication: asNumber(row.host),
       location: asNumber(row.location),
       value: asNumber(row.value),
-      host: asNumber(row.host),
     }),
     publicComment: typeof row.comment === "string" && row.comment.trim() ? row.comment.trim() : null,
     createdAt: row.created_at ?? null,

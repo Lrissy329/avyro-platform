@@ -17,7 +17,6 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
   TruckIcon,
-  MoonIcon,
 } from "@heroicons/react/24/outline";
 type DbListing = {
   id: string;
@@ -90,9 +89,7 @@ type ListingReviewsApiSummary = {
     accuracy: number;
     cleanliness: number;
     communication: number;
-    checkin: number;
-    noise: number;
-    transport: number;
+    location: number;
     value: number;
   };
   wouldStayAgainPct: number | null;
@@ -205,10 +202,9 @@ const FALLBACK_AMENITIES = [
 const REVIEW_ICON_MAP: Record<string, (typeof SparklesIcon)> = {
   Cleanliness: SparklesIcon,
   Accuracy: ShieldCheckIcon,
-  "Comfort & rest quality": MoonIcon,
-  "Location & access": MapPinIcon,
+  Communication: ChatBubbleLeftRightIcon,
+  Location: MapPinIcon,
   Value: CurrencyPoundIcon,
-  "Host reliability": ChatBubbleLeftRightIcon,
 };
 const LaurelIcon = () => (
   <svg
@@ -503,10 +499,9 @@ export default function ListingDetail() {
         {
           cleanliness: averages.cleanliness ?? 0,
           accuracy: averages.accuracy ?? 0,
-          comfort: averages.noise ?? 0,
-          location: averages.transport ?? 0,
+          communication: averages.communication ?? 0,
+          location: averages.location ?? 0,
           value: averages.value ?? 0,
-          host: ((averages.communication ?? 0) + (averages.checkin ?? 0)) / 2,
         },
         listingReviews.summary.count
       );
@@ -519,22 +514,28 @@ export default function ListingDetail() {
         typeof scores === "object" &&
         typeof scores.cleanliness === "number" &&
         typeof scores.accuracy === "number" &&
-        typeof scores.comfort === "number" &&
         typeof scores.location === "number" &&
-        typeof scores.value === "number" &&
-        typeof scores.host === "number"
+        typeof scores.value === "number"
       ) {
-        return buildReviewSummary(scores, Number((listing as any).review_count ?? 0));
+        return buildReviewSummary(
+          {
+            cleanliness: Number(scores.cleanliness ?? 0),
+            accuracy: Number(scores.accuracy ?? 0),
+            communication: Number(scores.communication ?? scores.host ?? 0),
+            location: Number(scores.location ?? scores.transport ?? 0),
+            value: Number(scores.value ?? 0),
+          },
+          Number((listing as any).review_count ?? 0)
+        );
       }
     }
     return buildReviewSummary(
       {
         cleanliness: 0,
         accuracy: 0,
-        comfort: 0,
+        communication: 0,
         location: 0,
         value: 0,
-        host: 0,
       },
       Number((listing as any)?.review_count ?? 0)
     );

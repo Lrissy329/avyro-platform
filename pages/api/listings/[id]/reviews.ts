@@ -20,10 +20,9 @@ const buildEmptySummary = () =>
     {
       cleanliness: 0,
       accuracy: 0,
-      comfort: 0,
+      communication: 0,
       location: 0,
       value: 0,
-      host: 0,
     },
     0
   );
@@ -36,10 +35,9 @@ const asNumber = (value: unknown): number => {
 const mapNewSummaryToLegacyScores = (summary: ListingReviewSummary): Record<ReviewCategoryKey, number> => ({
   cleanliness: summary.averages.cleanliness,
   accuracy: summary.averages.accuracy,
-  comfort: summary.averages.noise,
-  location: summary.averages.transport,
+  communication: summary.averages.communication,
+  location: summary.averages.location,
   value: summary.averages.value,
-  host: Number(((summary.averages.communication + summary.averages.checkin) / 2).toFixed(1)),
 });
 
 const legacyPublicReviews = (reviews: ListingPublicReview[]) =>
@@ -115,32 +113,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const mappedScores = reviews.map((row) => ({
       cleanliness: asNumber((row as any).cleanliness),
       accuracy: asNumber((row as any).accuracy),
-      comfort: asNumber((row as any).comfort),
+      communication: asNumber((row as any).host),
       location: asNumber((row as any).location),
       value: asNumber((row as any).value),
-      host: asNumber((row as any).host),
     }));
     const count = mappedScores.length;
     const totals = mappedScores.reduce(
       (acc, score) => {
         acc.cleanliness += score.cleanliness;
         acc.accuracy += score.accuracy;
-        acc.comfort += score.comfort;
+        acc.communication += score.communication;
         acc.location += score.location;
         acc.value += score.value;
-        acc.host += score.host;
         return acc;
       },
-      { cleanliness: 0, accuracy: 0, comfort: 0, location: 0, value: 0, host: 0 }
+      { cleanliness: 0, accuracy: 0, communication: 0, location: 0, value: 0 }
     );
     const summary = buildReviewSummary(
       {
         cleanliness: totals.cleanliness / count,
         accuracy: totals.accuracy / count,
-        comfort: totals.comfort / count,
+        communication: totals.communication / count,
         location: totals.location / count,
         value: totals.value / count,
-        host: totals.host / count,
       },
       count
     );

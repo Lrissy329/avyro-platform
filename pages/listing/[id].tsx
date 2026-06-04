@@ -3,6 +3,8 @@ import { useRouter } from "next/router";
 import AeronoocMap from "@/components/map";
 import BookingWidget from "@/components/BookingWidget";
 import AvailabilityCalendarNightly from "@/components/AvailabilityCalendarNightly";
+import MeetHostSection from "@/components/listing/MeetHostSection";
+import ProfileTrustCard from "@/components/listing/ProfileTrustCard";
 import { buildReviewSummary } from "@/lib/reviews";
 import { supabase } from "@/lib/supabaseClient";
 import { computePricingFromMajor, getServiceFeeRate } from "@/lib/pricing";
@@ -75,7 +77,11 @@ type TransportSummary = {
 type HostProfile = {
   full_name: string | null;
   avatar_url: string | null;
+  bio?: string | null;
+  display_name?: string | null;
   headline?: string | null;
+  verification_level?: number | null;
+  verification_status?: string | null;
 };
 type ListingReviewsApiSummary = {
   count: number;
@@ -382,7 +388,7 @@ export default function ListingDetail() {
       if (data.user_id) {
         const { data: profile } = await supabase
           .from("profiles")
-          .select("full_name, avatar_url, headline")
+          .select("full_name, avatar_url, display_name, headline, bio, verification_level, verification_status")
           .eq("id", data.user_id)
           .single();
         if (profile) setHost(profile as HostProfile);
@@ -483,6 +489,20 @@ export default function ListingDetail() {
   );
   const shortLocation =
     listing?.location?.split(",")[0]?.trim() || listing?.airport_code || listing?.title || "this stay";
+  const airportAreaLabel = listing?.airport_code ? listing.airport_code : null;
+  const hostName = (host?.display_name || host?.full_name || "Your host").trim();
+  const hostBadgeTone: "verified" | "default" =
+    (host?.verification_status ?? "").toLowerCase() === "verified" || (host?.verification_level ?? 0) >= 1
+      ? "verified"
+      : "default";
+  const hostBadgeLabel = hostBadgeTone === "verified" ? "Verified host" : "Flexivo host";
+  const hostHeadline =
+    host?.headline?.trim() ||
+    (airportAreaLabel ? `Professional host near ${airportAreaLabel}` : "Professional-ready stay host");
+  const hostAvatarUrl = host?.avatar_url ? toPublicUrl(host.avatar_url) ?? host.avatar_url : null;
+  const hostSummaryText = airportAreaLabel
+    ? `${hostName} provides practical, professional-ready stays for airport-area travellers near ${airportAreaLabel}.`
+    : `${hostName} provides practical, professional-ready stays for working professionals on Flexivo.`;
   const reviewSummary = useMemo(() => {
     if (listingReviews?.summary?.count && listingReviews.summary.count > 0) {
       const averages = listingReviews.summary.averages;
@@ -534,6 +554,7 @@ export default function ListingDetail() {
     [listingReviews]
   );
   const hasPublishedReviews = reviewSummary.total > 0;
+  const hostReviewFact = hasPublishedReviews ? `${reviewSummary.total} verified stay reviews` : "New host";
   const heroPhotos = useMemo(() => {
     if (photoUrls.length === 0) return ["/placeholder.jpg"];
     if (photoUrls.length >= 5) return photoUrls.slice(0, 5);
@@ -667,7 +688,7 @@ export default function ListingDetail() {
         <section className="mt-10 grid gap-8 lg:grid-cols-[1.3fr_0.7fr] lg:items-start">
           <div className="space-y-12">
             <div className="space-y-10 rounded-3xl bg-white p-6 shadow-sm">
-              <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-6 border-b border-slate-100 pb-6">
                 <div>
                   <div className="flex flex-wrap gap-2 text-sm text-slate-500">
                     {rentalTypeLabel && <span>{rentalTypeLabel}</span>}
@@ -676,36 +697,25 @@ export default function ListingDetail() {
                     <span>• {pluralise(listing.bathrooms, "bath")}</span>
                   </div>
                   <p className="text-sm text-slate-500">
-                    Perfect for travellers looking to be close to the
-                    airport and city links.
+                    Professional-ready accommodation with straightforward airport access and practical comforts.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3">
-                  <div className="h-12 w-12 rounded-full bg-slate-100">
-                    {host?.avatar_url ? (
-                      <img
-                        src={toPublicUrl(host.avatar_url) ?? host.avatar_url}
-                        alt={host.full_name ?? "Host avatar"}
-                        className="h-full w-full rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-sm font-semibold text-slate-500">
-                        {(host?.full_name || "Host")
-                          .split(" ")
-                          .map((part) => part[0])
-                          .join("")
-                          .slice(0, 2)}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Hosted by</p>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {host?.full_name ?? "Your host"}
-                    </p>
-                    <p className="text-xs text-slate-500">{host?.headline ?? "Superhost"}</p>
-                  </div>
-                </div>
+                <ProfileTrustCard
+                  compact
+                  name={hostName}
+                  avatarUrl={hostAvatarUrl}
+                  eyebrow="Hosted by"
+                  title={`Hosted by ${hostName}`}
+                  subtitle={hostHeadline}
+                  badge={hostBadgeLabel}
+                  badgeTone={hostBadgeTone}
+                  supportingText={hostSummaryText}
+                  facts={[
+                    hostReviewFact,
+                    airportAreaLabel ? `Near ${airportAreaLabel}` : "Airport-area accommodation",
+                  ]}
+                  className="bg-slate-50/90"
+                />
               </div>
               <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
                 <div>
@@ -894,6 +904,18 @@ export default function ListingDetail() {
             </div>
           </section>
         )}
+        <section className="mt-12">
+          <MeetHostSection
+            hostName={hostName}
+            hostAvatarUrl={hostAvatarUrl}
+            badge={hostBadgeLabel}
+            badgeTone={hostBadgeTone}
+            headline={hostHeadline}
+            bio={host?.bio ?? null}
+            reviewFact={hostReviewFact}
+            airportLabel={airportAreaLabel}
+          />
+        </section>
         <section className="mt-12 space-y-8" aria-label="Location and reviews">
           <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
             <div>

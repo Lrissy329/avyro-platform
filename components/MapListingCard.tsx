@@ -32,6 +32,7 @@ type MapListing = {
   travelMinutesMax?: number | null;
   travelMode?: string | null;
   driveMinutesToAirport?: number | null;
+  travelTimeApproximate?: boolean;
   quietForRest?: boolean | null;
   blackoutBlinds?: boolean | null;
   access24_7?: boolean | null;
@@ -138,9 +139,11 @@ const pickImage = (listing: MapListing): string => {
 };
 
 const buildTravelBadge = (listing: MapListing) => {
+  if (!listing.airportCode) return null;
+  if (listing.travelTimeApproximate) return `Near ${listing.airportCode}`;
   const min = safeMinutes(listing.travelMinutesMin) ?? safeMinutes(listing.driveMinutesToAirport);
   const label = formatMinutesRange(min, listing.travelMinutesMax ?? null);
-  if (!label || !listing.airportCode) return label;
+  if (!label) return null;
   return `${label} to ${listing.airportCode}`;
 };
 
@@ -223,21 +226,18 @@ export default function MapListingCard({
   const subline = buildSubline(listing);
 
   const travelMode = listing.travelMode ? String(listing.travelMode).toLowerCase() : "";
-  const fallbackMin = listing.travelMinutesMin ?? listing.driveMinutesToAirport ?? null;
+  const fallbackMin =
+    listing.travelTimeApproximate === true
+      ? null
+      : listing.travelMinutesMin ?? listing.driveMinutesToAirport ?? null;
   const fallbackMax = listing.travelMinutesMax ?? null;
   const taxiRange = formatMinutesRange(
     listing.taxiMin ?? (travelMode && travelMode.includes("public") ? null : fallbackMin),
     listing.taxiMax ?? (travelMode && travelMode.includes("public") ? null : fallbackMax)
   );
   const busRange = formatMinutesRange(
-    listing.publicTransportMin ??
-      (travelMode.includes("public") || travelMode.includes("transit") || travelMode.includes("bus")
-        ? fallbackMin
-        : null),
-    listing.publicTransportMax ??
-      (travelMode.includes("public") || travelMode.includes("transit") || travelMode.includes("bus")
-        ? fallbackMax
-        : null)
+    listing.publicTransportMin ?? null,
+    listing.publicTransportMax ?? null
   );
   const imageSrc = pickImage(listing);
   const listingId = listing.id;

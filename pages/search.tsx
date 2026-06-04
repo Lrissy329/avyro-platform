@@ -158,6 +158,7 @@ type SearchListing = {
   travelMinutesMin?: number | null;
   travelMinutesMax?: number | null;
   travelMode?: string | null;
+  travelTimeApproximate?: boolean;
   quietForRest?: boolean | null;
   blackoutBlinds?: boolean | null;
   access24_7?: boolean | null;
@@ -679,14 +680,17 @@ export default function SearchPage() {
             airportCoordPair
           );
 
-          const travelTypical =
+          const exactDriveMinutes =
             safeNumber(toNumber((l as any).drive_minutes_offpeak)) ??
             safeNumber(toNumber((l as any).taxi_typical_minutes)) ??
-            safeNumber(commute.driveMinutes);
+            safeNumber(toNumber((l as any).taxi_duration_minutes));
+          const travelTypical = exactDriveMinutes ?? safeNumber(commute.driveMinutes);
           const travelBuffer =
             safeNumber(toNumber((l as any).drive_minutes_buffer)) ??
             safeNumber(toNumber((l as any).taxi_buffer_minutes)) ??
             null;
+          const travelTimeApproximate =
+            exactDriveMinutes == null && safeNumber(commute.driveMinutes) != null;
           const travelMode = (l as any).transport_mode_typical ?? "taxi";
           const publicTransportMin =
             safeNumber(toNumber((l as any).public_transport_typical_minutes)) ??
@@ -737,10 +741,11 @@ export default function SearchPage() {
             booking_unit: (l.booking_unit as SearchListing["booking_unit"]) ?? null,
             thumbnail,
             distanceKmToAirport: commute.distanceKm,
-            driveMinutesToAirport: commute.driveMinutes,
+            driveMinutesToAirport: travelTypical,
             travelMinutesMin: safeNumber(travelTypical),
             travelMinutesMax: safeNumber(travelBuffer),
             travelMode,
+            travelTimeApproximate,
             quietForRest: Boolean((l as any).quiet_for_rest),
             blackoutBlinds: Boolean((l as any).blackout_blinds),
             access24_7: Boolean((l as any).access_24_7),
@@ -874,7 +879,13 @@ export default function SearchPage() {
         // Apply commute filter on computed values too (covers null DB values)
         if (!Number.isNaN(commuteMax)) {
           filtered = filtered.filter(
-            (l) => l.driveMinutesToAirport != null && l.driveMinutesToAirport <= commuteMax
+            (l) => {
+              const realCommute =
+                l.travelTimeApproximate === true
+                  ? null
+                  : l.travelMinutesMin ?? l.driveMinutesToAirport;
+              return realCommute == null || realCommute <= commuteMax;
+            }
           );
         }
 
@@ -1002,7 +1013,10 @@ export default function SearchPage() {
         let sorted = filtered;
         if ((q.sort || "").toLowerCase() === "crew") {
           const weight = (l: SearchListing) => {
-            const commute = l.driveMinutesToAirport ?? 9999;
+            const commute =
+              l.travelTimeApproximate === true
+                ? 9999
+                : l.driveMinutesToAirport ?? l.travelMinutesMin ?? 9999;
             const bonus =
               (toBool((l as any).blackout_blinds) ? -5 : 0) +
               (toBool((l as any).quiet_for_rest) ? -5 : 0) +

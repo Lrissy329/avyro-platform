@@ -36,6 +36,7 @@ type MapListing = {
   travelMinutesMax?: number | null;
   travelMode?: string | null;
   driveMinutesToAirport?: number | null;
+  travelTimeApproximate?: boolean | null;
   quietForRest?: boolean | null;
   blackoutBlinds?: boolean | null;
   access24_7?: boolean | null;
@@ -166,15 +167,28 @@ const getTransportInfo = (listing: MapListing) => {
   const travelMode = listing.travelMode ? String(listing.travelMode).toLowerCase() : "";
   const isPublic =
     travelMode.includes("public") || travelMode.includes("transit") || travelMode.includes("bus");
-  const fallbackMin = safeMinutes(listing.travelMinutesMin);
-  const fallbackMax = safeMinutes(listing.travelMinutesMax);
+  const fallbackMin =
+    listing.travelTimeApproximate ? null : safeMinutes(listing.travelMinutesMin);
+  const fallbackMax =
+    listing.travelTimeApproximate ? null : safeMinutes(listing.travelMinutesMax);
 
-  const publicMin = safeMinutes(listing.publicTransportMin) ?? (isPublic ? fallbackMin : null);
-  const publicMax = safeMinutes(listing.publicTransportMax) ?? (isPublic ? fallbackMax : null);
+  const publicMin = safeMinutes(listing.publicTransportMin);
+  const publicMax = safeMinutes(listing.publicTransportMax);
 
-  const driveMin = safeMinutes(listing.driveMinutesToAirport) ?? (!isPublic ? fallbackMin : null);
+  const driveMin =
+    safeMinutes(listing.taxiMin) ??
+    (listing.travelTimeApproximate
+      ? null
+      : safeMinutes(listing.driveMinutesToAirport) ?? (!isPublic ? fallbackMin : null));
   const driveMax =
-    listing.driveMinutesToAirport != null ? null : (!isPublic ? fallbackMax : null);
+    safeMinutes(listing.taxiMax) ??
+    (listing.travelTimeApproximate
+      ? null
+      : listing.driveMinutesToAirport != null
+      ? null
+      : !isPublic
+      ? fallbackMax
+      : null);
 
   let usePublic = false;
   if (publicMin != null && driveMin != null) {
@@ -322,14 +336,18 @@ export default function MapListingCardV2({
   const reviewLabel = reviewOverall != null ? formatReviewLabel(reviewOverall) : null;
 
   const transportInfo = getTransportInfo(listing);
-  const transportMinutes = transportInfo?.minutes;
+  const transportBadge = transportInfo?.minutes
+    ? `${transportInfo.minutes} to ${listing.airportCode ?? "airport"}`
+    : listing.travelTimeApproximate && listing.airportCode
+    ? `Near ${listing.airportCode}`
+    : null;
   const summaryText = buildSummary(listing);
   const locationText = listing.coordsMissing
     ? listing.locationFallback ?? listing.location ?? ""
     : listing.location ?? listing.locationFallback ?? "";
   const showStayTotalDetails = showStayTotal && stayTotal != null;
   const metadataLine = [
-    transportMinutes ? `${transportMinutes} to ${listing.airportCode ?? "airport"}` : null,
+    transportBadge,
     typeLabel,
     isSharedStay
       ? listing.sharedTotalSpots
@@ -403,9 +421,9 @@ export default function MapListingCardV2({
             <span className="absolute left-4 top-4 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
               {badgeText}
             </span>
-            {transportMinutes ? (
-              <span className="absolute bottom-4 left-4 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
-                {transportMinutes} to {listing.airportCode ?? "airport"}
+          {transportBadge ? (
+            <span className="absolute bottom-4 left-4 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+                {transportBadge}
               </span>
             ) : null}
           </div>
@@ -469,9 +487,9 @@ export default function MapListingCardV2({
           <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
             {badgeText}
           </span>
-          {transportMinutes ? (
+          {transportBadge ? (
             <span className="absolute bottom-3 left-3 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
-              {transportMinutes} to {listing.airportCode ?? "airport"}
+              {transportBadge}
             </span>
           ) : null}
         </div>

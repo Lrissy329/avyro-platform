@@ -28,6 +28,7 @@ type ListingLike = Partial<Listing> & {
   isSharedBookingAllowed?: boolean;
   distanceKmToAirport?: number | null;
   driveMinutesToAirport?: number | null;
+  travelTimeApproximate?: boolean;
   booking_unit?: "nightly" | "hourly" | null;
   bookingUnit?: "nightly" | "hourly" | null;
   coordsMissing?: boolean;
@@ -168,10 +169,12 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
     toNumber((listing as any).beds) ??
     toNumber((listing as any).bedrooms) ??
     null;
-  const travelMinutes =
-    toNumber((listing as any).driveMinutesToAirport) ??
-    toNumber((listing as any).travelMinutesMin) ??
-    null;
+  const travelTimeApproximate = Boolean((listing as any).travelTimeApproximate);
+  const travelMinutes = !travelTimeApproximate
+    ? toNumber((listing as any).travelMinutesMin) ??
+      toNumber((listing as any).driveMinutesToAirport) ??
+      null
+    : null;
   const airportCode =
     typeof (listing as any).airportCode === "string"
       ? (listing as any).airportCode
@@ -179,6 +182,8 @@ export const ListingCard = ({ listing, staySummary, onHover, onLeave, onSelect }
   const travelLabel =
     travelMinutes != null
       ? `${Math.round(travelMinutes)} min to ${airportCode ?? "airport"}`
+      : airportCode && travelTimeApproximate
+      ? `Near ${airportCode}`
       : null;
   const metadataLine = [
     travelLabel,

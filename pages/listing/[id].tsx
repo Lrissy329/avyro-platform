@@ -3,6 +3,8 @@ import { useRouter } from "next/router";
 import AeronoocMap from "@/components/map";
 import BookingWidget from "@/components/BookingWidget";
 import AvailabilityCalendarNightly from "@/components/AvailabilityCalendarNightly";
+import AirportAccessCard from "@/components/listing/AirportAccessCard";
+import ListingPhotoGallery from "@/components/listing/ListingPhotoGallery";
 import MeetHostSection from "@/components/listing/MeetHostSection";
 import ProfileTrustCard from "@/components/listing/ProfileTrustCard";
 import { buildReviewSummary } from "@/lib/reviews";
@@ -12,11 +14,9 @@ import { mapAmenities } from "@/lib/amenities";
 import {
   ChatBubbleLeftRightIcon,
   CurrencyPoundIcon,
-  ClockIcon,
   MapPinIcon,
   ShieldCheckIcon,
   SparklesIcon,
-  TruckIcon,
 } from "@heroicons/react/24/outline";
 type DbListing = {
   id: string;
@@ -149,26 +149,6 @@ const normalizePhotoEntry = (entry: unknown): string | null => {
 
   return null;
 };
-const formatTransportModes = (modes?: string[] | null) => {
-  if (!modes || modes.length === 0) return null;
-  const map: Record<string, string> = {
-    BUS: "Bus",
-    RAIL: "Rail",
-    SUBWAY: "Underground",
-    TRAIN: "Train",
-    TRAM: "Tram",
-    FERRY: "Ferry",
-  };
-  return modes
-    .map((mode) => map[mode] ?? mode.toLowerCase())
-    .map((mode) => mode.charAt(0).toUpperCase() + mode.slice(1))
-    .join(" + ");
-};
-const formatMinuteRange = (typical?: number | null, buffer?: number | null) => {
-  if (!typical) return null;
-  if (!buffer || buffer <= typical) return `${typical} min`;
-  return `${typical}–${buffer} min`;
-};
 const RENTAL_TYPE_LABELS: Record<string, string> = {
   overnight_stay: "Overnight stay",
   crashpad: "Extended stay",
@@ -290,35 +270,6 @@ export default function ListingDetail() {
       : "none";
   const bookingUnitLabel = BOOKING_UNIT_LABELS[bookingUnit];
   const bookingUnitDetail = BOOKING_UNIT_DETAILS[bookingUnit];
-  const transitLine = useMemo(() => {
-    const duration =
-      transportSummary?.public_transport_typical_minutes ??
-      transportSummary?.public_transport_duration_minutes ??
-      null;
-    const buffer = transportSummary?.public_transport_buffer_minutes ?? null;
-    const timeRange = formatMinuteRange(duration, buffer);
-    if (!timeRange) return null;
-    const transfers = transportSummary.public_transport_transfers;
-    const changeLabel =
-      transfers == null
-        ? null
-        : transfers === 0
-        ? "Direct"
-        : `${transfers} change${transfers === 1 ? "" : "s"}`;
-    const modes = formatTransportModes(transportSummary.public_transport_modes);
-    return [timeRange, changeLabel, modes].filter(Boolean).join(" · ");
-  }, [transportSummary]);
-  const taxiLine = useMemo(() => {
-    const duration =
-      transportSummary?.taxi_typical_minutes ??
-      transportSummary?.taxi_duration_minutes ??
-      null;
-    const buffer = transportSummary?.taxi_buffer_minutes ?? null;
-    const timeRange = formatMinuteRange(duration, buffer);
-    if (!timeRange) return null;
-    return timeRange;
-  }, [transportSummary]);
-
   useEffect(() => {
     if (!id || typeof id !== "string") return;
     (async () => {
@@ -486,6 +437,13 @@ export default function ListingDetail() {
   const shortLocation =
     listing?.location?.split(",")[0]?.trim() || listing?.airport_code || listing?.title || "this stay";
   const airportAreaLabel = listing?.airport_code ? listing.airport_code : null;
+  const galleryCommuteBadge = useMemo(() => {
+    if (!airportAreaLabel) return null;
+    const duration =
+      transportSummary?.taxi_typical_minutes ?? transportSummary?.taxi_duration_minutes ?? null;
+    if (typeof duration !== "number" || !Number.isFinite(duration) || duration <= 0) return null;
+    return `${Math.round(duration)} min to ${airportAreaLabel}`;
+  }, [airportAreaLabel, transportSummary]);
   const hostName = (host?.display_name || host?.full_name || "Your host").trim();
   const hostHeadline =
     host?.headline?.trim() ||
@@ -549,11 +507,6 @@ export default function ListingDetail() {
   );
   const hasPublishedReviews = reviewSummary.total > 0;
   const hostReviewFact = hasPublishedReviews ? `${reviewSummary.total} verified stay reviews` : "New host";
-  const heroPhotos = useMemo(() => {
-    if (photoUrls.length === 0) return ["/placeholder.jpg"];
-    if (photoUrls.length >= 5) return photoUrls.slice(0, 5);
-    return [...photoUrls, ...Array(5 - photoUrls.length).fill("/placeholder.jpg")];
-  }, [photoUrls]);
   const handleClearDates = () => {
     setNightlyRange({ from: null, to: null });
   };
@@ -643,42 +596,11 @@ export default function ListingDetail() {
             </button>
           </div>
         </header>
-        <section className="relative grid gap-2 rounded-3xl bg-white shadow-sm lg:grid-cols-2">
-          <div className="relative overflow-hidden rounded-3xl">
-            <div className="aspect-[4/3] lg:aspect-[5/4] w-full bg-slate-100">
-              <img
-                src={heroPhotos[0]}
-                alt="Listing hero"
-                className="h-full w-full object-cover"
-                loading="lazy"
-              />
-            </div>
-          </div>
-          <div className="hidden grid-cols-2 grid-rows-2 gap-2 lg:grid">
-            {heroPhotos.slice(1, 5).map((photo, idx) => (
-              <div key={idx} className="relative overflow-hidden rounded-2xl">
-                <div className="aspect-[4/3] w-full bg-slate-100">
-                  <img
-                    src={photo}
-                    alt={`Gallery ${idx + 2}`}
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="absolute right-4 top-4 hidden rounded-full border border-white/70 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm backdrop-blur hover:bg-white lg:inline-flex lg:items-center lg:gap-2"
-            onClick={() => {
-              const gallery = document.getElementById("gallery");
-              if (gallery) gallery.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-          >
-            Show all photos
-          </button>
-        </section>
+        <ListingPhotoGallery
+          photos={photoUrls}
+          title={listing.title}
+          commuteBadge={galleryCommuteBadge}
+        />
         <section className="mt-10 grid gap-8 lg:grid-cols-[1.3fr_0.7fr] lg:items-start">
           <div className="space-y-12">
             <div className="space-y-10 rounded-3xl bg-white p-6 shadow-sm">
@@ -730,7 +652,26 @@ export default function ListingDetail() {
                     "A thoughtfully curated pad close to key transport links. Expect hotel-level comforts with the privacy of your own space."}
                 </p>
               </div>
-              <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
+              <AirportAccessCard
+                airportCode={listing.airport_code}
+                driveMinutes={
+                  transportSummary?.taxi_typical_minutes ??
+                  transportSummary?.taxi_duration_minutes ??
+                  null
+                }
+                taxiMinutes={
+                  transportSummary?.taxi_typical_minutes ??
+                  transportSummary?.taxi_duration_minutes ??
+                  null
+                }
+                publicTransportMinutes={
+                  transportSummary?.public_transport_typical_minutes ??
+                  transportSummary?.public_transport_duration_minutes ??
+                  null
+                }
+                publicTransportModes={transportSummary?.public_transport_modes ?? null}
+              />
+              <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Where you’ll sleep</p>
                   <p className="text-sm text-slate-600">
@@ -738,51 +679,6 @@ export default function ListingDetail() {
                       ? pluralise(listing.beds, "rest space")
                       : `${pluralise(listing.beds, "bed")} - ${listing.type?.replace(/_/g, " ") ?? "Room"}`}
                   </p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {listing.airport_code ? (
-                      <>
-                        Getting to{" "}
-                        <span className="font-mono tabular-nums">{listing.airport_code}</span>
-                      </>
-                    ) : (
-                      "Getting here"
-                    )}
-                  </p>
-                  {transitLine || taxiLine ? (
-                    <div className="mt-2 space-y-2 text-sm text-slate-600">
-                      {transitLine && (
-                        <div className="flex items-start gap-2">
-                          <ClockIcon className="mt-0.5 h-4 w-4 text-slate-500" aria-hidden="true" />
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Public transport</span>
-                            <span className="text-sm font-medium text-slate-800">{transitLine}</span>
-                          </div>
-                        </div>
-                      )}
-                      {taxiLine && (
-                        <div className="flex items-start gap-2">
-                          <TruckIcon className="mt-0.5 h-4 w-4 text-slate-500" aria-hidden="true" />
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Taxi</span>
-                            <span className="text-sm font-medium text-slate-800">{taxiLine}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-600">
-                      {listing.airport_code ? (
-                        <>
-                          10–15 mins from{" "}
-                          <span className="font-mono tabular-nums">{listing.airport_code}</span>
-                        </>
-                      ) : (
-                        "Close to airport transfers"
-                      )}
-                    </p>
-                  )}
                 </div>
               </div>
               <div>

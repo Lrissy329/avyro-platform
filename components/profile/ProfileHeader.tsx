@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 export type ProfileHeaderProfile = {
@@ -6,6 +6,8 @@ export type ProfileHeaderProfile = {
   full_name?: string | null;
   email?: string | null;
   avatar_url?: string | null;
+  headline?: string | null;
+  bio?: string | null;
   verification_level?: number | null;
   verification_status?: string | null;
 };
@@ -14,6 +16,7 @@ type Props = {
   profile: ProfileHeaderProfile | null;
   onSaveName: (name: string) => Promise<void> | void;
   onUploadAvatar: (file: File) => Promise<void> | void;
+  details?: ReactNode;
 };
 
 const statusStyles: Record<string, string> = {
@@ -30,7 +33,7 @@ const resolveStatus = (profile: ProfileHeaderProfile | null) => {
   return "unverified";
 };
 
-export default function ProfileHeader({ profile, onSaveName, onUploadAvatar }: Props) {
+export default function ProfileHeader({ profile, onSaveName, onUploadAvatar, details }: Props) {
   const [name, setName] = useState(profile?.full_name ?? "");
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -117,6 +120,7 @@ export default function ProfileHeader({ profile, onSaveName, onUploadAvatar }: P
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-500">{profile?.email ?? ""}</p>
+          {details ? <div className="mt-4">{details}</div> : null}
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <input

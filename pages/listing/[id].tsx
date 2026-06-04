@@ -491,18 +491,11 @@ export default function ListingDetail() {
     listing?.location?.split(",")[0]?.trim() || listing?.airport_code || listing?.title || "this stay";
   const airportAreaLabel = listing?.airport_code ? listing.airport_code : null;
   const hostName = (host?.display_name || host?.full_name || "Your host").trim();
-  const hostBadgeTone: "verified" | "default" =
-    (host?.verification_status ?? "").toLowerCase() === "verified" || (host?.verification_level ?? 0) >= 1
-      ? "verified"
-      : "default";
-  const hostBadgeLabel = hostBadgeTone === "verified" ? "Verified host" : "Flexivo host";
   const hostHeadline =
     host?.headline?.trim() ||
     (airportAreaLabel ? `Professional host near ${airportAreaLabel}` : "Professional-ready stay host");
   const hostAvatarUrl = host?.avatar_url ? toPublicUrl(host.avatar_url) ?? host.avatar_url : null;
-  const hostSummaryText = airportAreaLabel
-    ? `${hostName} provides practical, professional-ready stays for airport-area travellers near ${airportAreaLabel}.`
-    : `${hostName} provides practical, professional-ready stays for working professionals on Flexivo.`;
+  const hostSummaryText = "Professional-ready accommodation for airport-area travellers.";
   const reviewSummary = useMemo(() => {
     if (listingReviews?.summary?.count && listingReviews.summary.count > 0) {
       const averages = listingReviews.summary.averages;
@@ -707,12 +700,10 @@ export default function ListingDetail() {
                   eyebrow="Hosted by"
                   title={`Hosted by ${hostName}`}
                   subtitle={hostHeadline}
-                  badge={hostBadgeLabel}
-                  badgeTone={hostBadgeTone}
                   supportingText={hostSummaryText}
-                  facts={[
-                    hostReviewFact,
-                    airportAreaLabel ? `Near ${airportAreaLabel}` : "Airport-area accommodation",
+                  trustBadges={[
+                    { type: "flexivo_host" },
+                    ...(airportAreaLabel ? [{ type: "airport_local" as const, label: `Near ${airportAreaLabel}` }] : []),
                   ]}
                   className="bg-slate-50/90"
                 />
@@ -908,8 +899,6 @@ export default function ListingDetail() {
           <MeetHostSection
             hostName={hostName}
             hostAvatarUrl={hostAvatarUrl}
-            badge={hostBadgeLabel}
-            badgeTone={hostBadgeTone}
             headline={hostHeadline}
             bio={host?.bio ?? null}
             reviewFact={hostReviewFact}

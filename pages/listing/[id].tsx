@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import AeronoocMap from "@/components/map";
 import BookingWidget from "@/components/BookingWidget";
@@ -9,7 +9,11 @@ import MeetHostSection from "@/components/listing/MeetHostSection";
 import ProfileTrustCard from "@/components/listing/ProfileTrustCard";
 import { buildReviewSummary } from "@/lib/reviews";
 import { supabase } from "@/lib/supabaseClient";
-import { computePricingFromMajor, getServiceFeeRate } from "@/lib/pricing";
+import {
+  computePricingFromMajor,
+  computeSharedPerPersonWeeklyPricePence,
+  getServiceFeeRate,
+} from "@/lib/pricing";
 import { mapAmenities } from "@/lib/amenities";
 import {
   ChatBubbleLeftRightIcon,
@@ -236,10 +240,12 @@ export default function ListingDetail() {
   const [host, setHost] = useState<HostProfile | null>(null);
   const [transportSummary, setTransportSummary] = useState<TransportSummary | null>(null);
   const [listingReviews, setListingReviews] = useState<ListingReviewsApiResponse | null>(null);
+  const [showMobileBookingSheet, setShowMobileBookingSheet] = useState(false);
   const [nightlyRange, setNightlyRange] = useState<{ from: Date | null; to: Date | null }>({
     from: null,
     to: null,
   });
+  const mobileSheetCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const [guests, setGuests] = useState({
     adults: 1,
     children: 0,
@@ -376,6 +382,7 @@ export default function ListingDetail() {
     const diff = end.getTime() - start.getTime();
     return Math.round(diff / (1000 * 60 * 60 * 24));
   }, [nightlyRange]);
+  const hasSelectedNightRange = Boolean(nightlyRange?.from && nightlyRange?.to && nights > 0);
   type BasePricing = {
     base: number;
     weeklySavings: number | null;
@@ -434,8 +441,6 @@ export default function ListingDetail() {
       ),
     [listing?.amenities?.join("|") ?? "__fallback__"]
   );
-  const shortLocation =
-    listing?.location?.split(",")[0]?.trim() || listing?.airport_code || listing?.title || "this stay";
   const airportAreaLabel = listing?.airport_code ? listing.airport_code : null;
   const galleryCommuteBadge = useMemo(() => {
     if (!airportAreaLabel) return null;
@@ -450,6 +455,38 @@ export default function ListingDetail() {
     (airportAreaLabel ? `Professional host near ${airportAreaLabel}` : "Professional-ready stay host");
   const hostAvatarUrl = host?.avatar_url ? toPublicUrl(host.avatar_url) ?? host.avatar_url : null;
   const hostSummaryText = "Professional-ready accommodation for airport-area travellers.";
+  const mobileBookingBarLabel = useMemo(() => {
+    if (listing?.is_shared_stay) return "Join shared stay";
+    if (listing?.allow_flexible_stays && listingFlexibleMode !== "none") return "Book with flexibility";
+    return "Reserve";
+  }, [listing?.allow_flexible_stays, listing?.is_shared_stay, listingFlexibleMode]);
+  const mobileBookingPriceLine = useMemo(() => {
+    if (listing?.is_shared_stay) {
+      const weekly = listing.shared_weekly_price_pence;
+      const totalSpots = Math.max(1, Math.round(Number(listing.shared_total_spots ?? 1)) || 1);
+      if (typeof weekly === "number" && Number.isFinite(weekly) && weekly > 0) {
+        const perPersonWeeklyPence = computeSharedPerPersonWeeklyPricePence({
+          totalWeeklyPricePence: weekly,
+          totalSpots,
+        }).rounded_per_person_weekly_pence;
+        return `${formatCurrency(perPersonWeeklyPence / 100)} / person / week`;
+      }
+      return "Check price";
+    }
+    if (typeof baseRate === "number" && Number.isFinite(baseRate) && baseRate > 0) {
+      return `${formatCurrency(baseRate)} / ${isHourlyListing ? "hour" : "night"}`;
+    }
+    return "Check price";
+  }, [
+    baseRate,
+    isHourlyListing,
+    listing?.is_shared_stay,
+    listing?.shared_total_spots,
+    listing?.shared_weekly_price_pence,
+  ]);
+  const mobileBookingDateSummary = hasSelectedNightRange
+    ? `${formatShortRange(nightlyRange.from)} – ${formatShortRange(nightlyRange.to)}`
+    : "Select dates";
   const reviewSummary = useMemo(() => {
     if (listingReviews?.summary?.count && listingReviews.summary.count > 0) {
       const averages = listingReviews.summary.averages;
@@ -510,6 +547,34 @@ export default function ListingDetail() {
   const handleClearDates = () => {
     setNightlyRange({ from: null, to: null });
   };
+  useEffect(() => {
+    if (!showMobileBookingSheet) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    mobileSheetCloseButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowMobileBookingSheet(false);
+      }
+    };
+    const media = window.matchMedia("(min-width: 1024px)");
+    const handleMediaChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        setShowMobileBookingSheet(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    media.addEventListener("change", handleMediaChange);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+      media.removeEventListener("change", handleMediaChange);
+    };
+  }, [showMobileBookingSheet]);
   const handleBooking = async () => {
     if (!listing) return;
     setBookingError(null);
@@ -568,7 +633,7 @@ export default function ListingDetail() {
   if (loading) return <main className="p-6 text-sm text-gray-600">Loading listing…</main>;
   if (!listing) return <main className="p-6 text-red-600">Listing not found.</main>;
   return (
-    <main className="min-h-screen bg-slate-50 pb-16">
+    <main className="min-h-screen bg-slate-50 pb-28 lg:pb-16">
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
         <header className="flex flex-wrap items-center justify-between gap-4 py-4">
           <div>
@@ -709,10 +774,66 @@ export default function ListingDetail() {
                 </div>
               </div>
             </div>
+            {!isHourlyListing && (
+              <section className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold text-slate-900">Availability</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {hasSelectedNightRange
+                        ? `${nights} night${nights === 1 ? "" : "s"} selected · ${formatShortRange(
+                            nightlyRange.from
+                          )} – ${formatShortRange(nightlyRange.to)}`
+                        : "Select dates to check availability"}
+                    </p>
+                  </div>
+                  {hasSelectedNightRange ? (
+                    <button
+                      type="button"
+                      onClick={handleClearDates}
+                      className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:border-slate-300 hover:text-slate-900"
+                    >
+                      Clear dates
+                    </button>
+                  ) : null}
+                </div>
+
+                {hasSelectedNightRange ? (
+                  <>
+                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
+                      <AvailabilityCalendarNightly
+                        listingId={listing.id}
+                        selectedRange={nightlyRange}
+                        onSelectRange={setNightlyRange}
+                        variant="inline"
+                      />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-3 text-xs font-medium text-slate-500">
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full border border-slate-300 bg-white" />
+                        Available
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.12)]" />
+                        Booked
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.06)]" />
+                        Blocked
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                    Select dates to check availability.
+                  </div>
+                )}
+              </section>
+            )}
 
           </div>
 
-          <aside className="self-start lg:sticky lg:top-24">
+          <aside className="hidden self-start lg:sticky lg:top-24 lg:block">
             <BookingWidget
               listingId={listing.id}
               listingTitle={listing.title}
@@ -743,55 +864,6 @@ export default function ListingDetail() {
             />
           </aside>
         </section>
-        {!isHourlyListing && (
-          <section className="mt-12">
-            <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-lg font-semibold text-slate-900">
-                    {nights > 0
-                      ? `${nights} night${nights > 1 ? "s" : ""} in ${shortLocation}`
-                      : "Check availability"}
-                  </p>
-                  <p className="text-sm text-slate-500">
-                    {nightlyRange?.from && nightlyRange?.to
-                      ? `${formatShortRange(nightlyRange.from)} – ${formatShortRange(nightlyRange.to)}`
-                      : "Select travel dates to see availability."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleClearDates}
-                  disabled={!nightlyRange?.from && !nightlyRange?.to}
-                  className="text-sm font-semibold text-slate-600 underline-offset-4 hover:text-slate-900 hover:underline disabled:opacity-40"
-                >
-                  Clear dates
-                </button>
-              </div>
-              <div className="mt-4 rounded-2xl border border-slate-200 p-3 sm:p-5">
-                <AvailabilityCalendarNightly
-                  listingId={listing.id}
-                  selectedRange={nightlyRange}
-                  onSelectRange={setNightlyRange}
-                />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-4 text-xs font-medium text-slate-500">
-                <span className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full border border-slate-300 bg-white" />
-                  Available
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.12)]" />
-                  Booked
-                </span>
-                <span className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.06)]" />
-                  Blocked
-                </span>
-              </div>
-            </div>
-          </section>
-        )}
         <section className="mt-12">
           <MeetHostSection
             hostName={hostName}
@@ -928,6 +1000,89 @@ export default function ListingDetail() {
           <p>&copy; {new Date().getFullYear()} Veloro — inspired by Airbnb excellence</p>
         </footer>
       </div>
+      <div
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/96 shadow-[0_-10px_30px_rgba(15,23,42,0.12)] backdrop-blur lg:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-slate-900">
+              {mobileBookingPriceLine}
+            </p>
+            <p className="truncate text-xs text-slate-500">{mobileBookingDateSummary}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowMobileBookingSheet(true)}
+            className="inline-flex shrink-0 items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+          >
+            {mobileBookingBarLabel}
+          </button>
+        </div>
+      </div>
+
+      {showMobileBookingSheet ? (
+        <div className="fixed inset-0 z-50 flex items-end lg:hidden" aria-modal="true" role="dialog">
+          <button
+            type="button"
+            aria-label="Close booking sheet"
+            className="absolute inset-0 bg-slate-950/45"
+            onClick={() => setShowMobileBookingSheet(false)}
+          />
+          <div
+            className="relative z-10 max-h-[85vh] w-full overflow-hidden rounded-t-[2rem] bg-slate-50 shadow-2xl"
+            style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{mobileBookingPriceLine}</p>
+                <p className="text-xs text-slate-500">{mobileBookingDateSummary}</p>
+              </div>
+              <button
+                ref={mobileSheetCloseButtonRef}
+                type="button"
+                onClick={() => setShowMobileBookingSheet(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white px-0 text-lg font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+              >
+                ×
+              </button>
+            </div>
+            <div
+              className="overflow-y-auto px-4 py-4 sm:px-6"
+              style={{ maxHeight: "calc(85vh - 4.5rem - env(safe-area-inset-bottom))" }}
+            >
+              <BookingWidget
+                listingId={listing.id}
+                listingTitle={listing.title}
+                basePrice={baseRate}
+                hostId={listing.user_id ?? ""}
+                isSharedStay={Boolean(listing.is_shared_stay)}
+                sharedTotalSpots={listing.shared_total_spots ?? 0}
+                sharedWeeklyPricePence={listing.shared_weekly_price_pence ?? null}
+                sharedJoinMode={listing.shared_join_mode ?? "open"}
+                sharedMinWeeks={listing.shared_min_weeks ?? 1}
+                sharedMaxWeeks={listing.shared_max_weeks ?? 12}
+                allowFlexibleStays={listing.allow_flexible_stays ?? false}
+                flexibleStayMode={listingFlexibleMode}
+                flexMinCommitmentNights={listing.flex_min_commitment_nights ?? 7}
+                flexMaxExtensionNights={listing.flex_max_extension_nights ?? 7}
+                flexExtensionNoticeHours={listing.flex_extension_notice_hours ?? 24}
+                flexExtensionPricingMode={
+                  listing.flex_extension_pricing_mode === "premium_10"
+                    ? "premium_10"
+                    : "same_rate"
+                }
+                flexRollingWindowDays={listing.flex_rolling_window_days ?? 3}
+                flexPricingMultiplier={listing.flex_pricing_multiplier ?? 1.1}
+                bookingUnit={listing.booking_unit === "hourly" ? "hourly" : "nightly"}
+                rentalType={listing.rental_type}
+                nightlyRange={nightlyRange}
+                onNightlyRangeChange={setNightlyRange}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -849,6 +849,38 @@ html, body, #__next { height: 100%; }
   margin: 0 12px;
 }
 
+.availability-datepicker--inline {
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.availability-datepicker--inline .react-datepicker__header {
+  padding-bottom: 0;
+}
+
+.availability-datepicker--inline .react-datepicker__month-container {
+  margin: 0;
+  padding: 0 2px 2px;
+}
+
+.availability-datepicker--inline .react-datepicker__day-name {
+  width: 34px;
+  line-height: 20px;
+  font-size: 0.68rem;
+}
+
+.availability-datepicker--inline .react-datepicker__day {
+  width: 34px;
+  line-height: 32px;
+  font-size: 0.82rem;
+}
+
+@media (min-width: 1280px) {
+  .availability-datepicker--inline {
+    flex-wrap: nowrap;
+  }
+}
+
 .availability-datepicker .avyro-day-booked {
   position: relative;
   background-color: rgba(11, 13, 16, 0.12) !important;

@@ -12,6 +12,7 @@ type AvailabilityCalendarNightlyProps = {
   listingId: string;
   selectedRange: NightlyRange;
   onSelectRange: (nextRange: NightlyRange) => void;
+  variant?: "default" | "inline";
 };
 
 const WINDOW_DAYS = 90;
@@ -54,6 +55,7 @@ export default function AvailabilityCalendarNightly({
   listingId,
   selectedRange,
   onSelectRange,
+  variant = "default",
 }: AvailabilityCalendarNightlyProps) {
   const [windowStart, setWindowStart] = useState(() => startOfDay(new Date()));
   const [windowEnd, setWindowEnd] = useState(() =>
@@ -72,12 +74,14 @@ export default function AvailabilityCalendarNightly({
   }, [listingId]);
 
   useEffect(() => {
-    const media = window.matchMedia("(min-width: 1024px)");
+    const media = window.matchMedia(
+      variant === "inline" ? "(min-width: 1280px)" : "(min-width: 1024px)"
+    );
     const updateMonths = () => setCalendarMonths(media.matches ? 2 : 1);
     updateMonths();
     media.addEventListener("change", updateMonths);
     return () => media.removeEventListener("change", updateMonths);
-  }, []);
+  }, [variant]);
 
   useEffect(() => {
     const fetchAvailability = async () => {
@@ -299,7 +303,11 @@ export default function AvailabilityCalendarNightly({
         excludeDates={disabledDates}
         monthsShown={calendarMonths}
         onMonthChange={handleMonthChange}
-        calendarClassName="booking-datepicker availability-datepicker"
+        calendarClassName={
+          variant === "inline"
+            ? "booking-datepicker availability-datepicker availability-datepicker--inline"
+            : "booking-datepicker availability-datepicker"
+        }
         dayClassName={dayClassName}
         renderCustomHeader={({
           monthDate,
@@ -317,7 +325,11 @@ export default function AvailabilityCalendarNightly({
                 type="button"
                 onClick={decreaseMonth}
                 disabled={prevMonthButtonDisabled || !isFirst}
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+                className={
+                  variant === "inline"
+                    ? "flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-base font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+                    : "flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+                }
                 aria-label="Previous month"
               >
                 ←
@@ -332,7 +344,11 @@ export default function AvailabilityCalendarNightly({
                 type="button"
                 onClick={increaseMonth}
                 disabled={nextMonthButtonDisabled || !isLast}
-                className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+                className={
+                  variant === "inline"
+                    ? "flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-base font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+                    : "flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 text-lg font-semibold text-[#0B0D10] hover:border-slate-400 disabled:opacity-0"
+                }
                 aria-label="Next month"
               >
                 →

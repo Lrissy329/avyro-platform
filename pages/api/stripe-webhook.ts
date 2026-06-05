@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { stripe } from "@/lib/stripe";
 import { createClient } from "@supabase/supabase-js";
 import { finalizeSharedGroupCheckout, isSharedGroupCheckoutSession } from "@/lib/sharedCheckout";
+import { sendBookingEmails } from "@/lib/email/sendBookingEmails";
 
 export const config = {
   api: {
@@ -162,6 +163,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           });
           if (sharedResult.error) {
             console.error("[stripe-webhook] shared checkout finalization failed:", sharedResult);
+          } else if (sharedResult.bookingId) {
+            try {
+              await sendBookingEmails({
+                supabaseAdmin,
+                bookingId: sharedResult.bookingId,
+                stripeCheckoutSessionId: session.id,
+                stripePaymentIntentId:
+                  typeof session.payment_intent === "string" ? session.payment_intent : null,
+              });
+            } catch (emailError) {
+              console.warn("[stripe-webhook] shared booking email send failed:", emailError);
+            }
           }
           break;
         }
@@ -262,6 +275,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             .eq("stripe_checkout_session_id", session.id);
         } else if (updateResult && (!updateResult.data || updateResult.data.length === 0)) {
           console.warn("[stripe-webhook] booking update matched no rows. Ensure booking exists.");
+        } else {
+          const resolvedBookingId = updateResult?.data?.[0]?.id ?? bookingId ?? null;
+          if (resolvedBookingId) {
+            try {
+              await sendBookingEmails({
+                supabaseAdmin,
+                bookingId: resolvedBookingId,
+                stripeCheckoutSessionId: session.id,
+                stripePaymentIntentId: paymentIntentId,
+              });
+            } catch (emailError) {
+              console.warn("[stripe-webhook] booking email send failed:", emailError);
+            }
+          }
         }
 
         break;

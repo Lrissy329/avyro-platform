@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { stripe } from "@/lib/stripe";
 import { createClient } from "@supabase/supabase-js";
 import { finalizeSharedGroupCheckout, isSharedGroupCheckoutSession } from "@/lib/sharedCheckout";
+import { sendBookingEmails } from "@/lib/email/sendBookingEmails";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -46,6 +47,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       isPaidLikeStatus(session.payment_status ?? "") ||
       isPaidLikeStatus(session.status ?? "") ||
       isPaidLikeStatus(paymentIntentStatus);
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? (session.payment_intent as string)
+        : typeof session.payment_intent === "object"
+        ? (session.payment_intent as any)?.id
+        : null;
 
     const metadata = session.metadata ?? {};
     if (isSharedGroupCheckoutSession(session as any)) {
@@ -74,6 +81,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (sharedResult.error) {
         return res.status(500).json({ error: sharedResult.error });
       }
+      if (sharedResult.bookingId) {
+        try {
+          await sendBookingEmails({
+            supabaseAdmin,
+            bookingId: sharedResult.bookingId,
+            stripeCheckoutSessionId: session.id,
+            stripePaymentIntentId: paymentIntentId,
+          });
+        } catch (emailError) {
+          console.warn("[stripe/confirm-session] shared booking email send failed", emailError);
+        }
+      }
       return res.status(200).json({ success: true, bookingId: sharedResult.bookingId });
     }
 
@@ -85,13 +104,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const listingId = (metadata.listingId ?? null) as string | null;
     const hostId = (metadata.hostId ?? null) as string | null;
     const guestId = (metadata.guestId ?? null) as string | null;
-
-    const paymentIntentId =
-      typeof session.payment_intent === "string"
-        ? (session.payment_intent as string)
-        : typeof session.payment_intent === "object"
-        ? (session.payment_intent as any)?.id
-        : null;
 
     let amountMinor: number | null = null;
     if (typeof session.amount_total === "number") {
@@ -140,7 +152,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (fallback?.error) {
         return res.status(409).json({ error: "Unable to match booking for this session." });
       }
-      return res.status(200).json({ success: true, bookingId: fallback.data?.[0]?.id ?? bookingId });
+      const resolvedBookingId = fallback.data?.[0]?.id ?? bookingId;
+      if (resolvedBookingId) {
+        try {
+          await sendBookingEmails({
+            supabaseAdmin,
+            bookingId: resolvedBookingId,
+            stripeCheckoutSessionId: session.id,
+            stripePaymentIntentId: paymentIntentId,
+          });
+        } catch (emailError) {
+          console.warn("[stripe/confirm-session] booking email send failed", emailError);
+        }
+      }
+      return res.status(200).json({ success: true, bookingId: resolvedBookingId });
     }
     if (result.error) {
       const paidFallback = { ...payload, status: "paid" };
@@ -151,7 +176,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ error: result.error.message });
     }
 
-    return res.status(200).json({ success: true, bookingId: result.data?.[0]?.id ?? bookingId });
+    const resolvedBookingId = result.data?.[0]?.id ?? bookingId;
+    if (resolvedBookingId) {
+      try {
+        await sendBookingEmails({
+          supabaseAdmin,
+          bookingId: resolvedBookingId,
+          stripeCheckoutSessionId: session.id,
+          stripePaymentIntentId: paymentIntentId,
+        });
+      } catch (emailError) {
+        console.warn("[stripe/confirm-session] booking email send failed", emailError);
+      }
+    }
+
+    return res.status(200).json({ success: true, bookingId: resolvedBookingId });
   } catch (err: any) {
     console.error("[stripe/confirm-session]", err);
     return res.status(500).json({ error: err?.message ?? "Server error" });

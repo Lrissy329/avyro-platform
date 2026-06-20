@@ -17,6 +17,11 @@ type HostEarningsChartProps = {
   data: EarningsDatum[];
 };
 
+const SERIES_LABELS: Record<string, string> = {
+  earnings: "Booked net",
+  expected: "In flight",
+};
+
 export function HostEarningsChart({ data }: HostEarningsChartProps) {
   return (
     <ResponsiveContainer width="100%" height={220} minHeight={220}>
@@ -31,7 +36,7 @@ export function HostEarningsChart({ data }: HostEarningsChartProps) {
           tickLine={false}
           axisLine={false}
           tick={{ fontSize: 11, fill: "#4B5563" }}
-          tickFormatter={(v) => `GBP ${v}`}
+          tickFormatter={(v) => `£${v}`}
         />
         <Tooltip
           contentStyle={{
@@ -39,7 +44,10 @@ export function HostEarningsChart({ data }: HostEarningsChartProps) {
             borderColor: "rgba(11, 13, 16, 0.12)",
             fontSize: 12,
           }}
-          formatter={(value: number | string) => [`GBP ${value}`, "Earnings"]}
+          formatter={(value: number | string, name: string) => [
+            `£${Number(value).toLocaleString("en-GB", { maximumFractionDigits: 0 })}`,
+            SERIES_LABELS[name] ?? name,
+          ]}
         />
         <Line
           type="monotone"

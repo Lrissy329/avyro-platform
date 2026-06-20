@@ -1,6 +1,7 @@
 import type { GetServerSideProps } from "next";
 import Link from "next/link";
 import OpsLayout from "@/components/ops/OpsLayout";
+import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import type { OpsRole } from "@/lib/opsRbac";
@@ -32,6 +33,7 @@ const STATUS_STYLES: Record<string, string> = {
   awaiting_payment: "bg-amber-500/20 text-amber-200 border-amber-500/40",
   pending_payment: "bg-amber-500/20 text-amber-200 border-amber-500/40",
   confirmed: "bg-emerald-500/20 text-emerald-200 border-emerald-500/40",
+  paid: "bg-emerald-500/20 text-emerald-200 border-emerald-500/40",
   payment_failed: "bg-rose-500/20 text-rose-200 border-rose-500/40",
   cancelled: "bg-rose-500/20 text-rose-200 border-rose-500/40",
   refunded: "bg-purple-500/20 text-purple-200 border-purple-500/40",
@@ -67,7 +69,9 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
     .order("created_at", { ascending: false })
     .limit(200);
 
-  if (status) {
+  if (status === "confirmed") {
+    query = query.in("status", ["confirmed", "paid"]);
+  } else if (status) {
     query = query.eq("status", status);
   }
 
@@ -104,7 +108,7 @@ export default function OpsBookings({ bookings, query, staffRole }: PageProps) {
         },
         {
           label: "Confirmed",
-          count: bookings.filter((b) => b.status === "confirmed").length,
+          count: bookings.filter((b) => isPaidFinalBookingStatus(b.status)).length,
           href: "/ops/bookings?status=confirmed",
           variant: "success",
         },
@@ -145,6 +149,7 @@ export default function OpsBookings({ bookings, query, staffRole }: PageProps) {
               <option value="awaiting_payment">Awaiting payment</option>
               <option value="pending_payment">Pending payment</option>
               <option value="confirmed">Confirmed</option>
+              <option value="paid">Paid (legacy)</option>
               <option value="cancelled">Cancelled</option>
               <option value="refunded">Refunded</option>
               <option value="payout_failed">Payout failed</option>

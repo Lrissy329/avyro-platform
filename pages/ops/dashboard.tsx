@@ -1,6 +1,7 @@
 import type { GetServerSideProps } from "next";
 import OpsLayout from "@/components/ops/OpsLayout";
 import { requireOpsStaff } from "@/lib/opsAuth";
+import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import type { OpsRole } from "@/lib/opsRbac";
 
@@ -41,7 +42,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
   ]);
 
   const revenue30d = (bookings ?? []).reduce((sum, row: any) => {
-    if (row?.status !== "confirmed") return sum;
+    if (!isPaidFinalBookingStatus(row?.status)) return sum;
     const value = Number(row?.price_total ?? 0);
     if (!Number.isFinite(value)) return sum;
     return sum + value;

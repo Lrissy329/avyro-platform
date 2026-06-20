@@ -235,5 +235,11 @@ export const isAwaitingPayment = (status?: string | null, stripeStatus?: string 
 
 export const canGuestCancel = (status?: string | null, stripeStatus?: string | null) => {
   const key = resolvePaymentStatus(status, stripeStatus);
-  return key === "pending" || key === "awaiting_payment" || key === "approved" || key === "confirmed";
+  return (
+    key === "pending" ||
+    key === "awaiting_payment" ||
+    key === "approved" ||
+    key === "confirmed" ||
+    key === "paid"
+  );
 };

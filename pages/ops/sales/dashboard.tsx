@@ -2,6 +2,7 @@ import type { GetServerSideProps } from "next";
 import Link from "next/link";
 import OpsLayout from "@/components/ops/OpsLayout";
 import { requireOpsStaff } from "@/lib/opsAuth";
+import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import type { OpsRole } from "@/lib/opsRbac";
 
@@ -85,7 +86,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
     bookings = data ?? [];
   }
 
-  const confirmedBookings = bookings.filter((row) => row.status === "confirmed");
+  const confirmedBookings = bookings.filter((row) => isPaidFinalBookingStatus(row.status));
   const firstBookingHosts = new Set(confirmedBookings.map((row) => row.host_id).filter(Boolean));
   const commissionPending = confirmedBookings.filter(
     (row) => row.payout_status !== "paid" && row.payout_status !== "in_transit"

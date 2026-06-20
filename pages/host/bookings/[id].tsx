@@ -5,6 +5,7 @@ import { useRouter } from "next/router";
 import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
+import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import GuestProfilePreviewCard from "@/components/profile/GuestProfilePreviewCard";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -299,7 +300,10 @@ export default function HostBookingDetailPage({
       ? Math.floor((guestTotalPence * stripeVarBps) / 10000) + stripeFixedPence
       : null;
 
-  const canCancel = status === "awaiting_payment" || status === "pending_payment" || status === "confirmed";
+  const canCancel =
+    status === "awaiting_payment" ||
+    status === "pending_payment" ||
+    isPaidFinalBookingStatus(status);
 
   const loadReviewEligibility = useCallback(async () => {
     if (!booking?.id) return;
@@ -480,7 +484,7 @@ export default function HostBookingDetailPage({
     if (booking?.stripe_status && ["paid", "succeeded"].includes(booking.stripe_status)) {
       items.push({ label: "Payment succeeded", time: booking?.created_at ?? null });
     }
-    if (status === "confirmed" || status === "paid" || status === "completed") {
+    if (isPaidFinalBookingStatus(status)) {
       items.push({ label: "Confirmed", time: booking?.created_at ?? null });
     }
     if (status === "cancelled") {

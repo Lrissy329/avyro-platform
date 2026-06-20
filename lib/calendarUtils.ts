@@ -5,6 +5,7 @@ import {
   LinearCalendarSource,
   ParsedIcalEvent,
 } from "./calendarTypes";
+import { isPaidFinalBookingStatus } from "./bookingStatus";
 
 export function parseISODate(d: string): Date {
   const [y, m, day] = d.split("-").map(Number);
@@ -22,7 +23,7 @@ export function resolveDayState(events: CalendarEvent[]): DayState {
 
   const hasDirectConfirmed = events.some(
     (e) =>
-      e.channel === "direct" && e.kind === "booking" && e.status === "confirmed"
+      e.channel === "direct" && e.kind === "booking" && isPaidFinalBookingStatus(e.status)
   );
 
   const hasDirectPending = events.some(

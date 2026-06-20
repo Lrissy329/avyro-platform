@@ -1,4 +1,5 @@
 import type { CalendarReservation } from "./useCalendarData";
+import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { formatCurrency } from "@/lib/dateUtils";
 
 type ReservationTooltipProps = {
@@ -10,7 +11,7 @@ type ReservationTooltipProps = {
 export function ReservationTooltip({ reservation, x, y }: ReservationTooltipProps) {
   const statusLabel = reservation.status.replace("_", " ");
   const statusClass =
-    reservation.status === "paid"
+    isPaidFinalBookingStatus(reservation.status)
       ? "bg-emerald-50 text-emerald-700"
       : reservation.status === "awaiting_payment"
         ? "bg-amber-50 text-amber-700"

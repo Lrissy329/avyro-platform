@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CalendarListing, CalendarReservation } from "./useCalendarData";
+import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { formatCurrency } from "@/lib/dateUtils";
 
 type ReservationDrawerProps = {
@@ -44,7 +45,7 @@ export function ReservationDrawer({
 
   const statusLabel = reservation.status.replace("_", " ");
   const statusClass =
-    reservation.status === "paid"
+    isPaidFinalBookingStatus(reservation.status)
       ? "bg-emerald-50 text-emerald-700"
       : reservation.status === "awaiting_payment"
         ? "bg-amber-50 text-amber-700"

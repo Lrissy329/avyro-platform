@@ -5,9 +5,11 @@ import { useRouter } from "next/router";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabaseClient";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
 import { HostSharedListingBadge } from "@/components/shared-stay/HostSharedListingBadge";
+import { evaluateListingReadiness, type ListingReadiness } from "@/lib/listingReadiness";
 
 type ListingSummary = {
   id: string;
@@ -20,7 +22,15 @@ type ListingSummary = {
   is_shared_stay?: boolean | null;
   shared_weekly_price_pence?: number | null;
   shared_total_spots?: number | null;
+  airport_code?: string | null;
+  photos?: string[] | null;
   created_at: string | null;
+};
+
+const readinessBadgeClass: Record<ListingReadiness["status"], string> = {
+  search_ready: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  needs_action: "border-amber-200 bg-amber-50 text-amber-700",
+  draft: "border-slate-200 bg-slate-100 text-slate-600",
 };
 
 const formatLabel = (value: string | null | undefined) => {
@@ -41,6 +51,7 @@ export default function HostListingsPage() {
   const [listings, setListings] = useState<ListingSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stripeConnected, setStripeConnected] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -64,7 +75,7 @@ export default function HostListingsPage() {
         const { data, error: fetchError } = await supabase
           .from("listings")
           .select(
-            "id, title, location, booking_unit, rental_type, price_per_night, price_per_hour, is_shared_stay, shared_weekly_price_pence, shared_total_spots, created_at"
+            "id, title, location, booking_unit, rental_type, price_per_night, price_per_hour, is_shared_stay, shared_weekly_price_pence, shared_total_spots, airport_code, photos, created_at"
           )
           .eq("user_id", userId)
           .order("created_at", { ascending: false });
@@ -74,7 +85,24 @@ export default function HostListingsPage() {
           setError(fetchError.message);
           setListings([]);
         } else {
-          setListings((data as ListingSummary[]) ?? []);
+          const rows = (data as ListingSummary[]) ?? [];
+          setListings(rows);
+
+          const [{ data: profileRow }] = await Promise.all([
+            supabase
+              .from("profiles")
+              .select("stripe_account_id, stripe_onboarding_status")
+              .eq("id", userId)
+              .maybeSingle(),
+          ]);
+
+          if (!isMounted) return;
+
+          setStripeConnected(
+            Boolean((profileRow as any)?.stripe_account_id) &&
+              String((profileRow as any)?.stripe_onboarding_status ?? "").toLowerCase() ===
+                "complete"
+          );
         }
       } catch (error: any) {
         if (!isMounted) return;
@@ -92,6 +120,18 @@ export default function HostListingsPage() {
   }, [router]);
 
   const listingCount = useMemo(() => listings.length, [listings.length]);
+  const listingReadiness = useMemo(
+    () =>
+      listings.map((listing) => ({
+        listing,
+        readiness: evaluateListingReadiness(listing, {
+          stripeConnected,
+          // Listings are open by default unless the host later adds blocks or bookings occupy dates.
+          availabilityConfigured: true,
+        }),
+      })),
+    [listings, stripeConnected]
+  );
 
   return (
     <HostShellLayout title="Listings" activeNav="listings">
@@ -133,7 +173,7 @@ export default function HostListingsPage() {
                 <span>Price</span>
                 <span>Actions</span>
               </div>
-              {listings.map((listing) => {
+              {listingReadiness.map(({ listing, readiness }) => {
                 const unit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
                 const price = unit === "hourly" ? listing.price_per_hour : listing.price_per_night;
                 return (
@@ -148,6 +188,24 @@ export default function HostListingsPage() {
                       <p className="text-xs text-slate-500">
                         {listing.location ?? "Location not set"}
                       </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Badge
+                          className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${readinessBadgeClass[readiness.status]}`}
+                        >
+                          {readiness.status === "search_ready"
+                            ? "Search Ready"
+                            : readiness.status === "draft"
+                            ? "Draft"
+                            : "Needs Action"}
+                        </Badge>
+                        {readiness.status === "search_ready" ? (
+                          <span className="text-xs text-emerald-700">✓ Search Ready</span>
+                        ) : (
+                          <span className="text-xs text-amber-700">
+                            ⚠ {readiness.reasons[0] ?? "Needs action before this listing can receive bookings."}
+                          </span>
+                        )}
+                      </div>
                       <HostSharedListingBadge
                         isSharedStay={listing.is_shared_stay}
                         totalSpots={listing.shared_total_spots}

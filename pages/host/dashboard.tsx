@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
 import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
+import { evaluateListingReadiness, type ListingReadiness } from "@/lib/listingReadiness";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 
 const HostEarningsChart = dynamic(
@@ -22,8 +23,13 @@ type ListingRow = {
   id: string;
   title: string | null;
   booking_unit: "nightly" | "hourly" | null;
+  rental_type?: string | null;
   price_per_night: number | null;
+  price_per_hour?: number | null;
   is_shared_stay: boolean | null;
+  shared_weekly_price_pence?: number | null;
+  airport_code?: string | null;
+  photos?: string[] | null;
   created_at: string | null;
 };
 
@@ -177,6 +183,12 @@ const trimStripeAccountId = (accountId?: string | null) => {
   return `${accountId.slice(0, 8)}…${accountId.slice(-4)}`;
 };
 
+const readinessBadgeClass: Record<ListingReadiness["status"], string> = {
+  search_ready: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  needs_action: "border-amber-200 bg-amber-50 text-amber-700",
+  draft: "border-slate-200 bg-slate-100 text-slate-600",
+};
+
 export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => {
   const authClient = createPagesServerClient(ctx);
   const {
@@ -197,6 +209,9 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
   const admin = getSupabaseServerClient();
 
   const listingSelects = [
+    "id, title, booking_unit, rental_type, price_per_night, price_per_hour, is_shared_stay, shared_weekly_price_pence, airport_code, photos, created_at",
+    "id, title, booking_unit, rental_type, price_per_night, price_per_hour, is_shared_stay, airport_code, photos, created_at",
+    "id, title, booking_unit, price_per_night, price_per_hour, is_shared_stay, airport_code, photos, created_at",
     "id, title, booking_unit, price_per_night, is_shared_stay, created_at",
     "id, title, booking_unit, price_per_night, created_at",
     "id, title, price_per_night, created_at",
@@ -461,7 +476,7 @@ export default function HostDashboardPage({
       newestSharedCreatedAt != null &&
       Date.now() - newestSharedCreatedAt <= 14 * 24 * 60 * 60 * 1000);
 
-  const stripeConnected = stripe.onboardingStatus === "complete";
+  const stripeConnected = Boolean(stripe.accountId) && stripe.onboardingStatus === "complete";
   const stripeLabel = stripeConnected
     ? "Connected"
     : stripe.accountId
@@ -472,6 +487,21 @@ export default function HostDashboardPage({
     : stripe.accountId
     ? "border-amber-200 bg-amber-50 text-amber-700"
     : "border-slate-200 bg-slate-50 text-slate-500";
+  const listingReadiness = listings.map((listing) => ({
+    listing,
+    readiness: evaluateListingReadiness(listing, {
+      stripeConnected,
+      // Listings are open by default unless the host later adds blocks or bookings occupy dates.
+      availabilityConfigured: true,
+    }),
+  }));
+  const readyListings = listingReadiness.filter((item) => item.readiness.status === "search_ready");
+  const unreadyListings = listingReadiness.filter((item) => item.readiness.status !== "search_ready");
+  const primaryListingIssue =
+    listings.length === 0
+      ? "Create your first listing to appear in search."
+      : unreadyListings[0]?.readiness.reasons[0] ??
+        "Complete pricing, airport and payout setup to receive bookings.";
 
   return (
     <HostShellLayout title="Hosting insights" activeNav="dashboard">
@@ -496,6 +526,41 @@ export default function HostDashboardPage({
             </>
           }
         />
+
+        <Card
+          className={`rounded-2xl border p-5 shadow-sm ${
+            readyListings.length > 0
+              ? "border-emerald-200 bg-emerald-50/70"
+              : "border-amber-200 bg-amber-50/70"
+          }`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p
+                className={`text-sm font-semibold ${
+                  readyListings.length > 0 ? "text-emerald-800" : "text-amber-800"
+                }`}
+              >
+                {readyListings.length > 0 ? "Listing live in search" : "Listing not currently eligible"}
+              </p>
+              <p
+                className={`mt-1 text-sm ${
+                  readyListings.length > 0 ? "text-emerald-700" : "text-amber-700"
+                }`}
+              >
+                {readyListings.length > 0
+                  ? `${readyListings.length} listing${readyListings.length === 1 ? "" : "s"} can receive public search traffic right now.`
+                  : primaryListingIssue}
+              </p>
+            </div>
+            <Link
+              href="/host/listings"
+              className="rounded-xl border border-current/15 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+            >
+              Review listing readiness
+            </Link>
+          </div>
+        </Card>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Card className="col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -725,16 +790,38 @@ export default function HostDashboardPage({
             <div className="mt-4">
               {listings.length ? (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {listings.slice(0, 6).map((listing) => (
+                  {listingReadiness.slice(0, 6).map(({ listing, readiness }) => (
                     <Link
                       key={listing.id}
                       href={`/host/listings/${listing.id}/pricing`}
-                      className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                     >
-                      <span className="truncate">{listing.title ?? "Untitled listing"}</span>
-                      <span className="ml-3 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                        {listing.booking_unit === "hourly" ? "Hourly" : "Nightly"}
-                      </span>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-slate-900">
+                            {listing.title ?? "Untitled listing"}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {readiness.status === "search_ready"
+                              ? "Search Ready"
+                              : readiness.reasons[0] ?? "Needs action"}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                            {listing.booking_unit === "hourly" ? "Hourly" : "Nightly"}
+                          </span>
+                          <Badge
+                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${readinessBadgeClass[readiness.status]}`}
+                          >
+                            {readiness.status === "search_ready"
+                              ? "Search Ready"
+                              : readiness.status === "draft"
+                              ? "Draft"
+                              : "Needs Action"}
+                          </Badge>
+                        </div>
+                      </div>
                     </Link>
                   ))}
                 </div>

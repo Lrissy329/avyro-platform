@@ -109,11 +109,11 @@ export default function HostProfilePage() {
 
   if (loading) {
     return (
-      <HostShellLayout title="Profile" activeNav="profile">
+        <HostShellLayout title="Profile" activeNav="profile">
         <div className="space-y-8">
           <HostPageHeader
             title="Profile"
-            description="Update your public host profile and verification badges."
+            description="Update your public host profile and account badges."
           />
           <p className="text-sm text-slate-600">Loading profile…</p>
         </div>
@@ -126,7 +126,7 @@ export default function HostProfilePage() {
       <div className="space-y-8">
         <HostPageHeader
           title="Profile"
-          description="Update your public host profile and verification badges."
+          description="Update your public host profile and account badges."
         />
         <ProfileHeader
           profile={profile}
@@ -136,7 +136,7 @@ export default function HostProfilePage() {
         <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-slate-900">Badges</h3>
           <p className="mt-1 text-sm text-slate-500">
-            These badges show guests you are verified and ready to host.
+            These badges show guests which account details are confirmed.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <Badge

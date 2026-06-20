@@ -107,6 +107,16 @@ const resolveVerification = (profile?: GuestProfile | null) => {
   return "unverified";
 };
 
+const resolveVerificationLabel = (profile?: GuestProfile | null) => {
+  const raw = (profile?.verification_status ?? "").toLowerCase();
+  const level = Number(profile?.verification_level ?? 0) || 0;
+  if (raw === "pending") return "Verification pending";
+  if (raw === "rejected") return "Verification rejected";
+  if (raw === "verified" && level >= 2) return "Document reviewed";
+  if (raw === "verified" || level >= 1) return "Work email verified";
+  return "No verification yet";
+};
+
 export default function HostGuestsPage() {
   const [hostId, setHostId] = useState<string | null>(null);
   const [bookings, setBookings] = useState<HostBookingRow[]>([]);
@@ -494,14 +504,7 @@ export default function HostGuestsPage() {
                         compact
                         profile={guestProfile}
                         secondaryBadge={{
-                          label:
-                            verification === "verified"
-                              ? "Verified"
-                              : verification === "pending"
-                              ? "Pending"
-                              : verification === "rejected"
-                              ? "Rejected"
-                              : "Unverified",
+                          label: resolveVerificationLabel(guestProfile),
                           tone:
                             verification === "verified"
                               ? "verified"

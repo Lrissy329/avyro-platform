@@ -63,7 +63,7 @@ const BADGE_CONFIG: Record<TrustBadgeType, TrustBadgeConfig> = {
     iconStyles: "text-emerald-600",
   },
   flexivo_host: {
-    label: "Flexivo host",
+    label: "Hosted on Flexivo",
     icon: ShieldCheck,
     styles: "border-[#FEDD02]/70 bg-[#FFF8CC] text-slate-800",
     iconStyles: "text-amber-600",

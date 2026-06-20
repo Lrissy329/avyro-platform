@@ -61,7 +61,7 @@ export default function GuestProfilePreviewCard({
   profile,
   compact = false,
   emailVerified = false,
-  showProfessionalPlaceholder = false,
+  showProfessionalPlaceholder: _showProfessionalPlaceholder = false,
   secondaryBadge,
   meta,
   className,
@@ -115,7 +115,6 @@ export default function GuestProfilePreviewCard({
           <div className="mt-3 flex flex-wrap gap-2">
             <TrustBadge type="profile_complete" label={profileBadge.label} />
             {emailVerified ? <TrustBadge type="email_verified" /> : null}
-            {showProfessionalPlaceholder ? <TrustBadge type="professional" /> : null}
           </div>
           {meta ? <div className="mt-2">{meta}</div> : null}
         </div>

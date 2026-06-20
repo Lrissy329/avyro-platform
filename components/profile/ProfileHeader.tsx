@@ -33,6 +33,16 @@ const resolveStatus = (profile: ProfileHeaderProfile | null) => {
   return "unverified";
 };
 
+const resolveStatusLabel = (profile: ProfileHeaderProfile | null) => {
+  const raw = (profile?.verification_status ?? "").toLowerCase();
+  const level = Number(profile?.verification_level ?? 0) || 0;
+  if (raw === "pending") return "Verification pending";
+  if (raw === "rejected") return "Verification rejected";
+  if (raw === "verified" && level >= 2) return "Document reviewed";
+  if (raw === "verified" || level >= 1) return "Work email verified";
+  return "No verification yet";
+};
+
 export default function ProfileHeader({ profile, onSaveName, onUploadAvatar, details }: Props) {
   const [name, setName] = useState(profile?.full_name ?? "");
   const [saving, setSaving] = useState(false);
@@ -45,6 +55,7 @@ export default function ProfileHeader({ profile, onSaveName, onUploadAvatar, det
   }, [profile?.full_name]);
 
   const status = resolveStatus(profile);
+  const statusLabel = resolveStatusLabel(profile);
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -113,10 +124,7 @@ export default function ProfileHeader({ profile, onSaveName, onUploadAvatar, det
                 statusStyles[status]
               }`}
             >
-              {status === "verified" && "Verified"}
-              {status === "pending" && "Pending"}
-              {status === "rejected" && "Rejected"}
-              {status === "unverified" && "Unverified"}
+              {statusLabel}
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-500">{profile?.email ?? ""}</p>

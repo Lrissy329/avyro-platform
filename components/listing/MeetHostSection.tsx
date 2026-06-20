@@ -1,6 +1,6 @@
 import ProfileTrustCard from "@/components/listing/ProfileTrustCard";
 import TrustBadge from "@/components/trust/TrustBadge";
-import { Clock3, MapPin, ShieldCheck } from "lucide-react";
+import { MapPin, ShieldCheck } from "lucide-react";
 
 type Props = {
   hostName: string;
@@ -20,8 +20,8 @@ export default function MeetHostSection({
   airportLabel,
 }: Props) {
   const defaultDescription = airportLabel
-    ? `${hostName} is a Flexivo host offering practical stays for working professionals near ${airportLabel}.`
-    : `${hostName} is a Flexivo host offering practical stays for working professionals.`;
+    ? `${hostName} hosts on Flexivo and offers practical stays for working professionals near ${airportLabel}.`
+    : `${hostName} hosts on Flexivo and offers practical stays for working professionals.`;
   const hostDescription = bio?.trim() || defaultDescription;
   const normalizedHostDescription =
     hostDescription === "Im a Captain based out of STN"
@@ -36,7 +36,7 @@ export default function MeetHostSection({
           avatarUrl={hostAvatarUrl}
           eyebrow="Host profile"
           title={hostName}
-          subtitle={headline || "Flexivo host"}
+          subtitle={headline || "Hosted on Flexivo"}
           supportingText="Hosts on Flexivo provide practical stays for professionals working near airports."
           facts={[]}
           trustBadges={[
@@ -54,7 +54,6 @@ export default function MeetHostSection({
           <div className="mt-4 flex flex-wrap gap-2">
             <TrustBadge type="flexivo_host" />
             {airportLabel ? <TrustBadge type="airport_local" label={`Near ${airportLabel}`} /> : null}
-            <TrustBadge type="responsive_host" />
           </div>
 
           <div className="mt-6 space-y-3">
@@ -63,13 +62,6 @@ export default function MeetHostSection({
               <div>
                 <p className="text-sm font-semibold text-slate-900">Host status</p>
                 <p className="text-sm text-slate-600">{reviewFact || "New host"}</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
-              <Clock3 className="mt-0.5 h-4 w-4 text-slate-500" aria-hidden="true" />
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Usually responds within a few hours</p>
-                <p className="text-sm text-slate-600">Questions before booking can be handled directly with the host.</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">

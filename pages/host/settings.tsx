@@ -189,7 +189,7 @@ export default function HostSettingsPage() {
                 <div>
                   <p className="text-sm font-semibold text-slate-900">Instant Book</p>
                   <p className="text-xs text-slate-500">
-                    Allow verified guests to book without approval (where supported).
+                    Allow guests meeting Flexivo verification requirements to book without approval (where supported).
                   </p>
                 </div>
                 <input

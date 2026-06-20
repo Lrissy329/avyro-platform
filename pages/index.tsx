@@ -25,7 +25,7 @@ const AIRPORT_MARKETPLACE_STAYS = [
     description: "Calm, practical stay with fast terminal access.",
     minutesToAirport: 14,
     airportCode: "LHR",
-    trustBadge: "Verified",
+    trustBadge: "Hosted on Flexivo",
     rating: 4.8,
     reviews: 31,
     pricePerNight: 79,
@@ -134,7 +134,7 @@ export default function Home() {
               <ul className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 text-sm text-slate-600 sm:flex sm:flex-wrap">
                 {[
                   "Near major airports",
-                  "Verified hosts",
+                  "Hosted on Flexivo",
                   "Flexible stays",
                   "Transparent pricing",
                 ].map((item) => (
@@ -174,7 +174,7 @@ export default function Home() {
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     10 min to Stansted
                   </p>
-                  <p className="mt-1 text-sm font-medium text-slate-900">Quiet stay · Verified host</p>
+                  <p className="mt-1 text-sm font-medium text-slate-900">Quiet stay · Hosted on Flexivo</p>
                 </div>
               </div>
             </div>

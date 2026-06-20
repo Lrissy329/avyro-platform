@@ -1312,7 +1312,7 @@ export default function SearchPage() {
           <div ref={resultsRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3.5 lg:px-5 lg:py-3.5">
             {airportCode && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-[13px] text-slate-700">
-                <span className="font-semibold">{listings.length}</span> verified stays near{" "}
+                <span className="font-semibold">{listings.length}</span> stays near{" "}
                 <span className="font-mono tabular-nums">{airportCode}</span>. All listings meet
                 enforced booking rules.
               </div>

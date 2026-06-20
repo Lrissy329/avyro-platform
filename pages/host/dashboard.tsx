@@ -183,6 +183,16 @@ const trimStripeAccountId = (accountId?: string | null) => {
   return `${accountId.slice(0, 8)}…${accountId.slice(-4)}`;
 };
 
+const AIRPORT_NAMES: Record<string, string> = {
+  STN: "Stansted Airport",
+  LHR: "Heathrow Airport",
+  LGW: "Gatwick Airport",
+  LTN: "Luton Airport",
+  MAN: "Manchester Airport",
+  BHX: "Birmingham Airport",
+  DUB: "Dublin Airport",
+};
+
 const readinessBadgeClass: Record<ListingReadiness["status"], string> = {
   search_ready: "border-emerald-200 bg-emerald-50 text-emerald-700",
   needs_action: "border-amber-200 bg-amber-50 text-amber-700",
@@ -497,6 +507,11 @@ export default function HostDashboardPage({
   }));
   const readyListings = listingReadiness.filter((item) => item.readiness.status === "search_ready");
   const unreadyListings = listingReadiness.filter((item) => item.readiness.status !== "search_ready");
+  const featuredReadyListing = readyListings[0]?.listing ?? null;
+  const featuredReadyAirportCode = String(featuredReadyListing?.airport_code ?? "").toUpperCase();
+  const featuredReadyAirportName =
+    AIRPORT_NAMES[featuredReadyAirportCode] ??
+    (featuredReadyAirportCode ? `${featuredReadyAirportCode} airport area` : "the airport area");
   const primaryListingIssue =
     listings.length === 0
       ? "Create your first listing to appear in search."
@@ -534,32 +549,45 @@ export default function HostDashboardPage({
               : "border-amber-200 bg-amber-50/70"
           }`}
         >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p
-                className={`text-sm font-semibold ${
-                  readyListings.length > 0 ? "text-emerald-800" : "text-amber-800"
-                }`}
-              >
-                {readyListings.length > 0 ? "Listing live in search" : "Listing not currently eligible"}
-              </p>
-              <p
-                className={`mt-1 text-sm ${
-                  readyListings.length > 0 ? "text-emerald-700" : "text-amber-700"
-                }`}
-              >
-                {readyListings.length > 0
-                  ? `${readyListings.length} listing${readyListings.length === 1 ? "" : "s"} can receive public search traffic right now.`
-                  : primaryListingIssue}
-              </p>
+          {readyListings.length > 0 && featuredReadyListing ? (
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-emerald-800">Your listing is live</p>
+                <div className="mt-3 space-y-1.5 text-sm text-emerald-700">
+                  <p>✓ Search eligible</p>
+                  <p>✓ Bookable</p>
+                  <p>✓ Visible near {featuredReadyAirportName}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  href={`/listing/${featuredReadyListing.id}`}
+                  className="rounded-xl border border-current/15 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  View listing
+                </Link>
+                <Link
+                  href={`/search?airport=${encodeURIComponent(featuredReadyAirportCode)}`}
+                  className="rounded-xl border border-current/15 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                >
+                  View in search results
+                </Link>
+              </div>
             </div>
-            <Link
-              href="/host/listings"
-              className="rounded-xl border border-current/15 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
-            >
-              Review listing readiness
-            </Link>
-          </div>
+          ) : (
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-amber-800">Your listing is created</p>
+                <p className="mt-1 text-sm text-amber-700">{primaryListingIssue}</p>
+              </div>
+              <Link
+                href="/host/listings"
+                className="rounded-xl border border-current/15 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+              >
+                Review listing readiness
+              </Link>
+            </div>
+          )}
         </Card>
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

@@ -25,6 +25,7 @@ export type OpsNavItem = {
   href: string;
   label: string;
   permission: OpsPermission;
+  priority?: "primary" | "secondary";
 };
 
 const ALL_PERMISSIONS: OpsPermission[] = [
@@ -69,17 +70,17 @@ const ROLE_PERMISSIONS: Record<OpsRole, OpsPermission[]> = {
 };
 
 export const NAV_ITEMS: OpsNavItem[] = [
-  { href: "/ops/dashboard", label: "Dashboard", permission: "ops:dashboard:ops" },
-  { href: "/ops/heatmap", label: "Heatmap", permission: "ops:dashboard:ops" },
-  { href: "/ops/bookings", label: "Bookings", permission: "ops:bookings:read" },
-  { href: "/ops/cases", label: "Cases", permission: "ops:cases:read" },
-  { href: "/ops/payouts", label: "Payouts", permission: "ops:payouts:read" },
-  { href: "/ops/verification", label: "Verification", permission: "ops:verification:read" },
-  { href: "/ops/users", label: "Users", permission: "ops:users:read" },
-  { href: "/ops/listings", label: "Listings", permission: "ops:listings:read" },
-  { href: "/ops/sales/dashboard", label: "Sales dashboard", permission: "ops:sales:read" },
-  { href: "/ops/sales/leads", label: "Sales", permission: "ops:sales:read" },
-  { href: "/ops/sales/targets", label: "Sales targets", permission: "ops:sales:read" },
+  { href: "/ops/dashboard", label: "Overview", permission: "ops:dashboard:ops", priority: "primary" },
+  { href: "/ops/bookings", label: "Bookings", permission: "ops:bookings:read", priority: "primary" },
+  { href: "/ops/listings", label: "Listings", permission: "ops:listings:read", priority: "primary" },
+  { href: "/ops/users", label: "Users", permission: "ops:users:read", priority: "primary" },
+  { href: "/ops/verification", label: "Verification", permission: "ops:verification:read", priority: "primary" },
+  { href: "/ops/payouts", label: "Payments", permission: "ops:payouts:read", priority: "primary" },
+  { href: "/ops/cases", label: "Cases", permission: "ops:cases:read", priority: "primary" },
+  { href: "/ops/heatmap", label: "Heatmap", permission: "ops:dashboard:ops", priority: "secondary" },
+  { href: "/ops/sales/dashboard", label: "Sales dashboard", permission: "ops:sales:read", priority: "secondary" },
+  { href: "/ops/sales/leads", label: "Sales", permission: "ops:sales:read", priority: "secondary" },
+  { href: "/ops/sales/targets", label: "Sales targets", permission: "ops:sales:read", priority: "secondary" },
 ];
 
 export function hasOpsPermission(role: OpsRole, permission: OpsPermission) {

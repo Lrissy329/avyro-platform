@@ -12,6 +12,7 @@ import { type ListingReadiness, evaluateListingReadiness } from "@/lib/listingRe
 import { requireOpsStaff } from "@/lib/opsAuth";
 import type { OpsRole } from "@/lib/opsRbac";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { formatOpsDate } from "@/lib/opsDateFormat";
 
 type ListingRow = {
   id: string;
@@ -58,17 +59,7 @@ const isMissingColumn = (error: any) => {
   return code === "42703" || code === "PGRST204" || message.includes("schema cache");
 };
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
-};
+const formatDate = (value?: string | null) => formatOpsDate(value);
 
 const formatListingPrice = (listing: ListingRow) => {
   if (listing.is_shared_stay && Number(listing.shared_weekly_price_pence ?? 0) > 0) {

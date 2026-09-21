@@ -4,6 +4,8 @@ import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
 import { stripe } from "@/lib/stripe";
 import { ensureRangeAvailable } from "@/lib/flexAvailability";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { getHostStripeReadiness } from "@/lib/hostStripeReadiness";
+import { PLATFORM_FEE_CAP_PENCE } from "@/lib/pricing";
 import {
   addDaysUtc,
   getFlexCutoffAt,
@@ -24,10 +26,10 @@ type ConfirmResponse =
   | { error: string; code?: string };
 
 const listingSelects = [
-  "id, listing_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, guest_total_pence, confirmed_total_pence, amount_paid_pence, latest_repriced_total_pence, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence, flex_extra_night_cutoff_at",
-  "id, listing_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, guest_total_pence, confirmed_total_pence, amount_paid_pence, latest_repriced_total_pence, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence",
-  "id, listing_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, guest_total_pence, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence",
-  "id, listing_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, flex_extra_night, flex_extra_night_status",
+  "id, listing_id, host_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, guest_total_pence, confirmed_total_pence, amount_paid_pence, latest_repriced_total_pence, platform_fee_bps, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence, flex_extra_night_cutoff_at",
+  "id, listing_id, host_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, guest_total_pence, confirmed_total_pence, amount_paid_pence, latest_repriced_total_pence, platform_fee_bps, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence",
+  "id, listing_id, host_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, guest_total_pence, platform_fee_bps, flex_extra_night, flex_extra_night_status, flex_extra_night_price_pence",
+  "id, listing_id, host_id, guest_id, status, currency, nights, check_out_time, stripe_payment_intent_id, platform_fee_bps, flex_extra_night, flex_extra_night_status",
 ] as const;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ConfirmResponse>) {
@@ -130,6 +132,66 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
   if (!Number.isFinite(amountPence) || amountPence <= 0) {
     return res.status(409).json({ error: "Flex extra night amount is not available." });
   }
+  const chargeAmountPence = Math.round(amountPence);
+
+  // Host Stripe Connect readiness gate -- must run before any Stripe call
+  // that could charge the card (including the prior-PaymentIntent lookup
+  // just below, which exists solely to prepare that charge). Nothing in
+  // this route creates a new payable DB row/state before the charge --
+  // flex_extra_night_status only transitions from "reserved" to "used"
+  // after the PaymentIntent succeeds, at the very end of this handler --
+  // so there is no phantom-row risk to guard against here the way there
+  // was for bookings/create.ts and shared-groups/checkout.ts; this gate is
+  // placed here purely to fail fast, before spending a Stripe API call on
+  // a charge that can't legally proceed anyway.
+  if (!booking.host_id) {
+    return res.status(409).json({ error: "Host context is missing for this booking." });
+  }
+  const hostReadiness = await getHostStripeReadiness(String(booking.host_id));
+  if (!hostReadiness.ready || !hostReadiness.stripeAccountId) {
+    console.error("[api/flex/confirm] host not ready for Stripe Connect charge", {
+      hostId: booking.host_id,
+      bookingId: booking.id,
+      stripeAccountId: hostReadiness.stripeAccountId,
+      chargesEnabled: hostReadiness.chargesEnabled,
+      payoutsEnabled: hostReadiness.payoutsEnabled,
+    });
+    return res.status(409).json({ error: "Host is not ready to accept payments.", code: "HOST_NOT_ONBOARDED" });
+  }
+  const hostStripeAccountId = hostReadiness.stripeAccountId;
+
+  // application_fee_amount uses this booking's own existing platform-fee
+  // basis (platform_fee_bps, persisted at booking-creation time by
+  // pages/api/bookings/create.ts) -- the same percentage this booking's
+  // original charge already used -- rather than a freshly invented
+  // calculation. The floor/cap combination mirrors the same formula P0-C/
+  // P0-D already use, reusing the same centralized PLATFORM_FEE_CAP_PENCE
+  // constant from lib/pricing.ts.
+  const platformFeeBps = Number(booking.platform_fee_bps);
+  if (!Number.isFinite(platformFeeBps) || platformFeeBps < 0) {
+    console.error("[api/flex/confirm] booking has no trustworthy platform_fee_bps", {
+      bookingId: booking.id,
+      raw: booking.platform_fee_bps,
+    });
+    return res.status(500).json({ error: "Unable to determine platform fee for this booking." });
+  }
+  const applicationFeeAmount = Math.min(
+    Math.floor((chargeAmountPence * platformFeeBps) / 10000),
+    PLATFORM_FEE_CAP_PENCE
+  );
+  if (
+    !Number.isInteger(applicationFeeAmount) ||
+    applicationFeeAmount < 0 ||
+    applicationFeeAmount > chargeAmountPence
+  ) {
+    console.error("[api/flex/confirm] computed application_fee_amount is invalid", {
+      bookingId: booking.id,
+      chargeAmountPence,
+      platformFeeBps,
+      applicationFeeAmount,
+    });
+    return res.status(500).json({ error: "Invalid application fee amount computed for this flex charge." });
+  }
 
   if (!booking.stripe_payment_intent_id) {
     return res.status(409).json({
@@ -173,19 +235,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
   let flexPaymentIntent: any;
   try {
-    flexPaymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amountPence),
-      currency: String(booking.currency ?? "GBP").toLowerCase(),
-      payment_method: paymentMethodId,
-      customer: customerId,
-      off_session: true,
-      confirm: true,
-      metadata: {
-        booking_id: String(booking.id),
-        flex_extra_night: "true",
+    flexPaymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: chargeAmountPence,
+        currency: String(booking.currency ?? "GBP").toLowerCase(),
+        payment_method: paymentMethodId,
+        customer: customerId,
+        off_session: true,
+        confirm: true,
+        application_fee_amount: applicationFeeAmount,
+        transfer_data: {
+          destination: hostStripeAccountId,
+        },
+        metadata: {
+          booking_id: String(booking.id),
+          flex_extra_night: "true",
+        },
+        description: `Avyro flex extra night (${booking.id})`,
       },
-      description: `Avyro flex extra night (${booking.id})`,
-    });
+      {
+        idempotencyKey: `flex-confirm-${booking.id}`,
+      }
+    );
   } catch (error: any) {
     return res.status(402).json({
       error: "Unable to charge the saved card for the extra night.",

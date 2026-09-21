@@ -33,6 +33,8 @@ type ListingPin = {
   pricePerHour?: number;
   price_per_night?: number;
   pricePerNight?: number;
+  booking_unit?: string | null;
+  bookingUnit?: string | null;
   is_shared_stay?: boolean;
   isSharedStay?: boolean;
   shared_weekly_price_pence?: number;
@@ -290,12 +292,23 @@ export default function AeronoocMap({
                 isFirstCompletedBooking: false,
               })
             : null);
+        // Say what the number is per, so £150/wk and £105/nt are never read as the same thing.
+        const isHourly = String(pin.booking_unit ?? pin.bookingUnit ?? "").toLowerCase() === "hourly";
+        const unit =
+          guestStayTotal != null
+            ? " total"
+            : sharedGuestUnitPrice != null
+            ? "/wk"
+            : isHourly
+            ? "/hr"
+            : "/nt";
         return {
           id: pin.id,
           longitude: coords[0],
           latitude: coords[1],
           title: pin.title || pin.name || "Listing",
           nightly,
+          unit,
         };
       })
       .filter(Boolean) as Array<{
@@ -304,6 +317,7 @@ export default function AeronoocMap({
       latitude: number;
       title: string;
       nightly: number | null;
+      unit: string;
     }>;
   }, [listings]);
 
@@ -564,7 +578,7 @@ export default function AeronoocMap({
               >
                 <MarkerDot active={isActive} hovered={isHover} theme={theme}>
                   <span className="font-mono tabular-nums">
-                    {pin.nightly != null ? `£${Math.round(pin.nightly)}` : pin.title}
+                    {pin.nightly != null ? `£${Math.round(pin.nightly)}${pin.unit}` : pin.title}
                   </span>
                 </MarkerDot>
               </button>

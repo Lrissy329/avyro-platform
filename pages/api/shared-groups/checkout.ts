@@ -1,7 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { stripe } from "@/lib/stripe";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
-import { computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
+import { computeSharedPerPersonWeeklyPricePence, getPlatformFeeBps, PLATFORM_FEE_CAP_PENCE } from "@/lib/pricing";
+import { getHostStripeReadiness } from "@/lib/hostStripeReadiness";
 import {
   addMinutesIso,
   getSharedStayWeeks,
@@ -10,10 +11,9 @@ import {
   SHARED_GROUP_PENDING_HOLD_MINUTES,
 } from "@/lib/sharedStay";
 import {
+  checkListingSharedCapacityForRange,
   cleanupExpiredPendingSharedMembers,
-  getSharedGroupOccupancy,
   isMissingSharedSchema,
-  listOverlappingSharedGroupsWithOccupancy,
 } from "@/lib/sharedGroupsDb";
 
 type CheckoutResponse =
@@ -192,6 +192,27 @@ export default async function handler(
     });
   }
 
+  // Host Stripe Connect readiness gate -- must run before any shared-group
+  // occupancy/member hold or booking row is created. A pending
+  // shared_group_members reservation already counts toward the group's
+  // occupancy (getSharedGroupOccupancy), and the provisional bookings row
+  // created further below is subject to the same no_overlap EXCLUDE
+  // constraint concern already fixed for the standard booking path
+  // (P0-C) -- both would leave a phantom hold/row for a host who can never
+  // actually be paid.
+  const hostReadiness = await getHostStripeReadiness(listing.user_id);
+  if (!hostReadiness.ready || !hostReadiness.stripeAccountId) {
+    console.error("[api/shared-groups/checkout] host not ready for Stripe Connect charge", {
+      hostId: listing.user_id,
+      listingId,
+      stripeAccountId: hostReadiness.stripeAccountId,
+      chargesEnabled: hostReadiness.chargesEnabled,
+      payoutsEnabled: hostReadiness.payoutsEnabled,
+    });
+    return res.status(409).json({ error: "Host is not ready to accept payments.", code: "HOST_NOT_ONBOARDED" });
+  }
+  const hostStripeAccountId = hostReadiness.stripeAccountId;
+
   const minWeeks = Math.max(1, toInt(listing.shared_min_weeks ?? 1, 1, 1));
   const maxWeeks = Math.max(minWeeks, toInt(listing.shared_max_weeks ?? 12, 12, minWeeks));
   if (weeksResult.weeks < minWeeks || weeksResult.weeks > maxWeeks) {
@@ -230,33 +251,11 @@ export default async function handler(
   const checkoutAction: "join" | "start" = action === "start" ? "start" : "join";
   let targetGroup: any = null;
 
-  if (checkoutAction === "start") {
-    try {
-      const overlappingGroups = await listOverlappingSharedGroupsWithOccupancy(supabase, {
-        listingId,
-        windowStart: checkIn,
-        windowEnd: checkOut,
-        statuses: ["open", "full", "closed"],
-        cleanupExpiredPending: true,
-      });
-      const conflictingOccupiedGroup = overlappingGroups.find(
-        (group) =>
-          group.confirmed > 0 &&
-          !(group.startDate === checkIn && group.endDate === checkOut)
-      );
-      if (conflictingOccupiedGroup) {
-        return res.status(409).json({
-          error: "These dates are already reserved for another shared stay.",
-          code: "SHARED_GROUP_RANGE_RESERVED",
-        });
-      }
-    } catch (error: any) {
-      if (!isMissingSharedSchema(error)) {
-        return res.status(500).json({ error: error?.message ?? "Failed to validate shared availability." });
-      }
-    }
-  }
-
+  // Resolve (but do not yet create) the target group. "join" requires an
+  // existing group -- 404 if none matches, unchanged. "start" looks up an
+  // exact-date match only; if none exists, creation is deferred until
+  // after the single authoritative capacity check below, so a brand-new
+  // (empty) group is never created when capacity is already unavailable.
   if (checkoutAction === "join") {
     if (sharedGroupId) {
       const groupResult = await supabase
@@ -312,9 +311,92 @@ export default async function handler(
         .status(500)
         .json({ error: existingGroupResult.error.message ?? "Failed to load existing groups." });
     }
-    if (existingGroupResult.data?.id) {
-      targetGroup = existingGroupResult.data;
-    } else {
+    targetGroup = existingGroupResult.data ?? null;
+  }
+
+  // existingMembership can only be non-null if targetGroup already exists
+  // -- a brand-new group ("start" with no exact-date match, targetGroup
+  // still null here) cannot have a prior membership to look up.
+  let existingMembership: { id: string; status: string; reservation_expires_at: string | null } | null = null;
+  if (targetGroup?.id) {
+    try {
+      await cleanupExpiredPendingSharedMembers(supabase, [String(targetGroup.id)]);
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message ?? "Failed to refresh pending members." });
+    }
+
+    const existingMembershipResult = await supabase
+      .from("shared_group_members")
+      .select("id, status, reservation_expires_at")
+      .eq("shared_group_id", targetGroup.id)
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingMembershipResult.error && !isMissingSharedSchema(existingMembershipResult.error)) {
+      return res.status(500).json({
+        error: existingMembershipResult.error.message ?? "Failed to verify existing membership.",
+      });
+    }
+    existingMembership = existingMembershipResult.data ?? null;
+  }
+
+  if (existingMembership?.status === "confirmed") {
+    return res.status(409).json({
+      error: "You already joined this shared stay.",
+      code: "SHARED_GROUP_ALREADY_JOINED",
+    });
+  }
+
+  // additionalOccupants reflects the product rule exactly: an existing
+  // membership counts as 0 additional occupants only if it is ALREADY
+  // active occupancy (confirmed, or pending with a hold that has not
+  // expired) -- not merely "a row exists". Cancelled, expired-pending, and
+  // "no membership at all" all mean this request would add a genuinely new
+  // physical occupant. Mirrors getSharedGroupOccupancy's own effective-
+  // active test (lib/sharedGroupsDb.ts) -- expiry is read directly from
+  // reservation_expires_at, never inferred from status alone.
+  const nowMs = Date.now();
+  const existingMembershipAlreadyActive = Boolean(
+    existingMembership &&
+      (existingMembership.status === "confirmed" ||
+        (existingMembership.status === "pending" &&
+          (!existingMembership.reservation_expires_at ||
+            new Date(existingMembership.reservation_expires_at).getTime() > nowMs)))
+  );
+
+  // Single authoritative aggregate-capacity decision, shared by both the
+  // start and join flows -- made now, with full context (whether the
+  // guest already occupies a spot), and before a brand-new group would
+  // ever be created, so capacity exhaustion never leaves an empty group
+  // behind. Each shared_groups row's own total_spots is set to the full
+  // listing capacity (see totalSpots above), so a per-group-only check
+  // would allow two different overlapping groups to each fill to the
+  // listing's full capacity independently, jointly overselling a shared
+  // night. This is still an app-level, advisory check (race-window caveat
+  // documented in the Stage 2 migration design); the DB trigger extension
+  // in Stage 2 is what makes this actually race-safe.
+  const listingCapacityCheck = await checkListingSharedCapacityForRange(supabase, {
+    listingId,
+    startDate: checkIn,
+    endDate: checkOut,
+    listingTotalSpots: totalSpots,
+    additionalOccupants: existingMembershipAlreadyActive ? 0 : 1,
+  });
+  if (!listingCapacityCheck.ok) {
+    return res.status(409).json(
+      targetGroup?.id
+        ? { error: "This shared group is now full.", code: "SHARED_GROUP_FULL" }
+        : {
+            error: "These dates are already reserved for another shared stay.",
+            code: "SHARED_GROUP_RANGE_RESERVED",
+          }
+    );
+  }
+
+  if (!targetGroup?.id) {
+    // "start", no exact-date group existed, and capacity is now confirmed
+    // available -- create it, not before the capacity check above.
     const createGroupResult = await supabase
       .from("shared_groups")
       .insert({
@@ -331,6 +413,12 @@ export default async function handler(
 
     if (createGroupResult.error) {
       if (String(createGroupResult.error.code ?? "") === "23505") {
+        // Lost a create race to another concurrent "start" request for the
+        // exact same dates -- adopt the group it created. This is the same
+        // pre-existing race-retry path the original code had; the
+        // capacity/membership decision above was made before this other
+        // group's existence was known, so the Stage 2 DB trigger (not yet
+        // applied) is what makes this specific sub-case fully race-safe.
         const retryExisting = await supabase
           .from("shared_groups")
           .select("id, listing_id, start_date, end_date, total_spots, status")
@@ -348,59 +436,21 @@ export default async function handler(
           });
         }
       } else {
-      if (isMissingSharedSchema(createGroupResult.error)) {
-        return res.status(500).json({
-          error: "Shared stay tables are not available yet. Run the latest migration first.",
-        });
-      }
-      return res
-        .status(500)
-        .json({ error: createGroupResult.error.message ?? "Failed to create shared group." });
+        if (isMissingSharedSchema(createGroupResult.error)) {
+          return res.status(500).json({
+            error: "Shared stay tables are not available yet. Run the latest migration first.",
+          });
+        }
+        return res
+          .status(500)
+          .json({ error: createGroupResult.error.message ?? "Failed to create shared group." });
       }
     } else {
       targetGroup = createGroupResult.data;
     }
-    }
   }
 
   const targetGroupId = String(targetGroup.id);
-  try {
-    await cleanupExpiredPendingSharedMembers(supabase, [targetGroupId]);
-  } catch (error: any) {
-    return res.status(500).json({ error: error?.message ?? "Failed to refresh pending members." });
-  }
-
-  const existingMembershipResult = await supabase
-    .from("shared_group_members")
-    .select("id, status, reservation_expires_at")
-    .eq("shared_group_id", targetGroupId)
-    .eq("user_id", userId)
-    .limit(1)
-    .maybeSingle();
-
-  if (existingMembershipResult.error && !isMissingSharedSchema(existingMembershipResult.error)) {
-    return res.status(500).json({
-      error: existingMembershipResult.error.message ?? "Failed to verify existing membership.",
-    });
-  }
-
-  const existingMembership = existingMembershipResult.data;
-  if (existingMembership?.status === "confirmed") {
-    return res.status(409).json({
-      error: "You already joined this shared stay.",
-      code: "SHARED_GROUP_ALREADY_JOINED",
-    });
-  }
-
-  const occupancyByGroup = await getSharedGroupOccupancy(supabase, [targetGroupId]);
-  const occupancy = occupancyByGroup[targetGroupId] ?? { active: 0, confirmed: 0, pending: 0 };
-  const groupTotalSpots = Math.max(1, toInt(targetGroup.total_spots ?? totalSpots, totalSpots, 1));
-  if (occupancy.active >= groupTotalSpots) {
-    return res.status(409).json({
-      error: "This shared group is now full.",
-      code: "SHARED_GROUP_FULL",
-    });
-  }
 
   const reservationExpiresAt = addMinutesIso(SHARED_GROUP_PENDING_HOLD_MINUTES);
   const memberPayload = {
@@ -471,6 +521,45 @@ export default async function handler(
     sharedGroupMemberId = String(memberInsert.data.id);
   }
   const amountPence = perPersonWeeklyPricePence * weeksResult.weeks;
+
+  // Host net derivation -- shared_weekly_price_pence (and therefore
+  // amountPence, the member's guest charge) is treated as already
+  // all-inclusive per product decision; amountPence itself is never
+  // changed here. The platform fee is computed from amountPence using the
+  // same nights-tiered bps table and cap the standard booking path
+  // centralizes in lib/pricing.ts -- getPlatformFeeBps() for the
+  // percentage, PLATFORM_FEE_CAP_PENCE for the cap -- combined with the
+  // same floor/cap arithmetic lib/pricing.ts's computeFeeEstimates() uses
+  // internally, mirrored here rather than imported since that function
+  // isn't exported and also folds in Stripe-fee/margin reasoning this
+  // per-member derivation doesn't need.
+  const sharedNightsForFeeTier = weeksResult.weeks * 7;
+  const sharedPlatformFeeBps = getPlatformFeeBps({
+    nights: sharedNightsForFeeTier,
+    isFirstCompletedBooking: false,
+  });
+  const applicationFeeAmount = Math.min(
+    Math.floor((amountPence * sharedPlatformFeeBps) / 10000),
+    PLATFORM_FEE_CAP_PENCE
+  );
+  const hostNetTotalPence = amountPence - applicationFeeAmount;
+
+  if (
+    !Number.isInteger(applicationFeeAmount) ||
+    applicationFeeAmount < 0 ||
+    applicationFeeAmount > amountPence
+  ) {
+    console.error("[api/shared-groups/checkout] computed application_fee_amount is invalid", {
+      amountPence,
+      sharedPlatformFeeBps,
+      applicationFeeAmount,
+      sharedGroupMemberId,
+    });
+    return res.status(500).json({
+      error: "Invalid application fee amount computed for this shared-stay charge.",
+    });
+  }
+
   const provisionalBookingPayload = {
     listing_id: String(listingId),
     host_id: String(listing.user_id),
@@ -486,6 +575,8 @@ export default async function handler(
     currency: "GBP",
     price_total: amountPence / 100,
     guest_total_pence: amountPence,
+    host_net_total_pence: hostNetTotalPence,
+    platform_fee_bps: sharedPlatformFeeBps,
     guest_unit_price_pence: weeksResult.weeks > 0 ? Math.round(amountPence / (weeksResult.weeks * 7)) : amountPence,
     booking_type: "shared_group",
     shared_group_id: targetGroupId,
@@ -535,49 +626,63 @@ export default async function handler(
     : `${origin}/booking/success?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${origin}/listing/${listingId}?payment=cancelled`;
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    currency: "gbp",
-    customer_creation: "always",
-    payment_method_types: ["card"],
-    payment_intent_data: {
-      setup_future_usage: "off_session",
-    },
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: "gbp",
-          unit_amount: amountPence,
-          product_data: {
-            name: listing.title
-              ? `Shared stay at ${listing.title}`
-              : "Shared stay",
-            description: `${weeksResult.weeks} week${weeksResult.weeks === 1 ? "" : "s"} · 1 spot`,
-          },
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "payment",
+      currency: "gbp",
+      customer_creation: "always",
+      payment_method_types: ["card"],
+      payment_intent_data: {
+        setup_future_usage: "off_session",
+        application_fee_amount: applicationFeeAmount,
+        transfer_data: {
+          destination: hostStripeAccountId,
         },
       },
-    ],
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    metadata: {
-      checkout_kind: "shared_group_member",
-      shared_group_id: targetGroupId,
-      shared_group_member_id: sharedGroupMemberId,
-      listing_id: String(listingId),
-      host_id: String(listing.user_id),
-      guest_id: String(userId),
-      booking_id: provisionalBookingId ?? "",
-      booking_type: "shared_group",
-      check_in: checkIn,
-      check_out: checkOut,
-      weeks: String(weeksResult.weeks),
-      per_person_weekly_price_pence: String(perPersonWeeklyPricePence),
-      total_property_weekly_price_pence: String(totalWeeklyPricePence),
-      amount_pence: String(amountPence),
-      action: checkoutAction,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "gbp",
+            unit_amount: amountPence,
+            product_data: {
+              name: listing.title
+                ? `Shared stay at ${listing.title}`
+                : "Shared stay",
+              description: `${weeksResult.weeks} week${weeksResult.weeks === 1 ? "" : "s"} · 1 spot`,
+            },
+          },
+        },
+      ],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      // Matches the 30-minute shared_group_members reservation hold set
+      // above (SHARED_GROUP_PENDING_HOLD_MINUTES) so the payment window
+      // and the capacity hold always expire together -- see
+      // pages/api/stripe-webhook.ts's checkout.session.expired handler.
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      metadata: {
+        checkout_kind: "shared_group_member",
+        shared_group_id: targetGroupId,
+        shared_group_member_id: sharedGroupMemberId,
+        listing_id: String(listingId),
+        host_id: String(listing.user_id),
+        guest_id: String(userId),
+        booking_id: provisionalBookingId ?? "",
+        booking_type: "shared_group",
+        check_in: checkIn,
+        check_out: checkOut,
+        weeks: String(weeksResult.weeks),
+        per_person_weekly_price_pence: String(perPersonWeeklyPricePence),
+        total_property_weekly_price_pence: String(totalWeeklyPricePence),
+        amount_pence: String(amountPence),
+        action: checkoutAction,
+      },
     },
-  });
+    {
+      idempotencyKey: `shared-checkout-${sharedGroupMemberId}`,
+    }
+  );
   debugLog({
     base_url: origin,
     success_url: successUrl,

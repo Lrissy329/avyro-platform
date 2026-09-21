@@ -1,23 +1,19 @@
-import {
-  BusFront,
-  CarFront,
-  CarTaxiFront,
-  PlaneTakeoff,
-  TrainFront,
-} from "lucide-react";
+import { BusFront, CarTaxiFront, TrainFront } from "lucide-react";
+
+import { classifyTransitModes, isValidClockTime } from "@/lib/transportTimes";
 
 type Props = {
   airportCode?: string | null;
-  driveMinutes?: number | null;
+  // Minutes and distance for the road journey (car or taxi), from listing_transport_summaries.
   taxiMinutes?: number | null;
+  distanceKm?: number | null;
   publicTransportMinutes?: number | null;
   publicTransportModes?: string[] | null;
-};
-
-type AccessRow = {
-  label: string;
-  value: string;
-  Icon: typeof CarFront;
+  publicTransportTransfers?: number | null;
+  // Earliest public-transport departure found from about 04:00, "HH:MM" local time.
+  publicTransportFirstDeparture?: string | null;
+  // Optional Google Maps directions link from the stay to the airport.
+  directionsUrl?: string | null;
 };
 
 const AIRPORT_NAME_MAP: Record<string, string> = {
@@ -30,122 +26,118 @@ const AIRPORT_NAME_MAP: Record<string, string> = {
   DUB: "Dublin Airport",
 };
 
-const joinClasses = (...values: Array<string | false | null | undefined>) =>
-  values.filter(Boolean).join(" ");
+const toMinutes = (value?: number | null) =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : null;
 
-const formatMinutes = (minutes?: number | null, suffix?: string) => {
-  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes <= 0) return null;
-  const rounded = Math.round(minutes);
-  return `${rounded} min${suffix ? ` ${suffix}` : ""}`;
-};
-
-const modeSetFrom = (modes?: string[] | null) =>
-  new Set(
-    (modes ?? [])
-      .map((mode) => String(mode ?? "").trim().toUpperCase())
-      .filter(Boolean)
-  );
-
-function AccessItem({ label, value, Icon }: AccessRow) {
+function AccessRow({
+  Icon,
+  label,
+  detail,
+  minutes,
+}: {
+  Icon: typeof BusFront;
+  label: string;
+  detail?: string | null;
+  minutes: number;
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white/80 px-3 py-2.5">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
-          <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-        </div>
-        <span className="text-sm font-medium text-slate-700">{label}</span>
+    <li className="flex items-center gap-4 py-4 first:pt-0 last:pb-0">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+        <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-slate-900">{label}</p>
+        {detail ? <p className="mt-0.5 text-xs leading-5 text-slate-500">{detail}</p> : null}
       </div>
-      <span className="text-right text-sm font-semibold text-slate-900">{value}</span>
-    </div>
+      <p className="shrink-0 text-right text-slate-900">
+        <span className="text-2xl font-semibold tracking-tight tabular-nums">{minutes}</span>
+        <span className="ml-1 text-sm font-medium text-slate-500">min</span>
+      </p>
+    </li>
   );
 }
 
 export default function AirportAccessCard({
   airportCode,
-  driveMinutes,
   taxiMinutes,
+  distanceKm,
   publicTransportMinutes,
   publicTransportModes,
+  publicTransportTransfers,
+  publicTransportFirstDeparture,
+  directionsUrl,
 }: Props) {
-  const normalizedCode =
+  const code =
     typeof airportCode === "string" && airportCode.trim() ? airportCode.trim().toUpperCase() : null;
-  const airportName = normalizedCode ? AIRPORT_NAME_MAP[normalizedCode] ?? `${normalizedCode} Airport` : null;
-  modeSetFrom(publicTransportModes);
-  void publicTransportMinutes;
+  const airportName = code ? AIRPORT_NAME_MAP[code] ?? `${code} Airport` : null;
 
-  const rows: AccessRow[] = [
-    {
-      label: "Drive",
-      value: formatMinutes(driveMinutes, "estimate") ?? "Coming soon",
-      Icon: CarFront,
-    },
-    {
-      label: "Taxi",
-      value: formatMinutes(taxiMinutes, "estimate") ?? "Coming soon",
-      Icon: CarTaxiFront,
-    },
-    {
-      label: "Bus",
-      value: "Coming soon",
-      Icon: BusFront,
-    },
-    {
-      label: "Train",
-      value: "Coming soon",
-      Icon: TrainFront,
-    },
-  ];
+  const roadMinutes = toMinutes(taxiMinutes);
+  const transitMinutes = toMinutes(publicTransportMinutes);
+
+  const roadDetail =
+    typeof distanceKm === "number" && Number.isFinite(distanceKm) && distanceKm > 0
+      ? `${distanceKm.toFixed(1)} km`
+      : null;
+
+  const kind = classifyTransitModes(publicTransportModes);
+  const transitLabel = kind === "bus" ? "By bus" : kind === "train" ? "By train" : "By public transport";
+  const TransitIcon = kind === "train" ? TrainFront : BusFront;
+  const changes =
+    typeof publicTransportTransfers === "number" && Number.isFinite(publicTransportTransfers)
+      ? publicTransportTransfers <= 0
+        ? "Direct"
+        : `${publicTransportTransfers} change${publicTransportTransfers === 1 ? "" : "s"}`
+      : null;
+  const firstService = isValidClockTime(publicTransportFirstDeparture)
+    ? `first service ${publicTransportFirstDeparture}`
+    : null;
+  const transitDetail = [changes, firstService].filter(Boolean).join(" · ") || null;
+
+  const hasTimes = roadMinutes != null || transitMinutes != null;
 
   return (
-    <section className="rounded-[1.75rem] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.98))] p-4 shadow-sm sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <p className="text-lg font-semibold text-slate-900">Airport access</p>
-          <p className="text-sm text-slate-500">
-            Practical travel options for getting to the airport.
-          </p>
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">
+            {airportName ? `Getting to ${airportName}` : "Getting to the airport"}
+          </h2>
+          {hasTimes ? (
+            <p className="mt-1 text-sm text-slate-500">Typical journey time from this stay.</p>
+          ) : null}
         </div>
-        {normalizedCode ? (
-          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-800">
-            {normalizedCode}
-          </span>
+        {directionsUrl ? (
+          <a
+            href={directionsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900 underline-offset-4 hover:text-slate-900 hover:underline"
+          >
+            Get directions <span aria-hidden>→</span>
+          </a>
         ) : null}
       </div>
 
-      {normalizedCode && airportName ? (
+      {hasTimes ? (
         <>
-          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/85 px-3.5 py-3 shadow-sm">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-              <PlaneTakeoff className="h-4 w-4" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900">{airportName}</p>
-              <p className="text-xs text-slate-500">{normalizedCode} airport access</p>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
-            {rows.map((row) => (
-              <AccessItem key={row.label} {...row} />
-            ))}
-          </div>
-
-          <div className="mt-4 space-y-1.5">
-            <p className="text-sm font-medium text-slate-700">
-              Designed for early starts, late finishes, and repeat airport trips.
-            </p>
-            <p className="text-xs text-slate-500">
-              Travel times are estimates and may vary by time of day.
-            </p>
-          </div>
+          <ul className="mt-5 divide-y divide-slate-100">
+            {roadMinutes != null ? (
+              <AccessRow Icon={CarTaxiFront} label="By car or taxi" detail={roadDetail} minutes={roadMinutes} />
+            ) : null}
+            {transitMinutes != null ? (
+              <AccessRow Icon={TransitIcon} label={transitLabel} detail={transitDetail} minutes={transitMinutes} />
+            ) : null}
+          </ul>
+          <p className="mt-5 text-xs leading-5 text-slate-500">
+            Estimates for a quiet weekday. Allow extra at busy times, and check public transport if you
+            travel very early or late.
+          </p>
         </>
       ) : (
-        <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3.5 py-4">
-          <p className="text-sm font-medium text-slate-700">Airport access details coming soon.</p>
-          <p className="mt-1 text-sm text-slate-500">
-            We’ll surface practical airport travel estimates here once this stay’s access details are confirmed.
-          </p>
-        </div>
+        <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          Travel times for this stay haven&apos;t been calculated yet.
+          {directionsUrl ? " You can check the route yourself with the directions link." : ""}
+        </p>
       )}
     </section>
   );

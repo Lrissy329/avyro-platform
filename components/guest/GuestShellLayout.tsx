@@ -5,6 +5,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
+import { SUPPORT_EMAIL } from "@/lib/support";
 
 type NavKey = "trips" | "messages" | "reviews" | "payments" | "profile";
 
@@ -144,12 +145,22 @@ export function GuestShellLayout({ activeNav, title, children }: GuestShellLayou
           })}
         </nav>
 
-        <div className="mt-4 text-xs text-slate-500">Travelling mode.</div>
+        <div className="mt-4 space-y-2 text-xs text-slate-500">
+          <p>Travelling mode.</p>
+          <a href={`mailto:${SUPPORT_EMAIL}`} className="block font-medium text-slate-600 hover:text-slate-900">
+            Need help? Contact support
+          </a>
+        </div>
       </aside>
 
       <div className="flex min-h-screen flex-1 flex-col">
         <header className="border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
-          <p className="text-sm font-semibold text-slate-900">{pageTitle}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-slate-900">{pageTitle}</p>
+            <a href={`mailto:${SUPPORT_EMAIL}`} className="text-xs font-medium text-slate-500 hover:text-slate-900">
+              Support
+            </a>
+          </div>
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
             {navItems.map((item) => {
               const active =

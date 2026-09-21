@@ -115,6 +115,7 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
   const [messageDraft, setMessageDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [bookingMeta, setBookingMeta] = useState<Record<string, BookingMeta>>({});
   const [partnerProfiles, setPartnerProfiles] = useState<Record<string, PartnerProfile>>({});
@@ -252,15 +253,26 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
     const missing = userIds.filter((id) => id && !partnerProfilesRef.current[id]);
     if (missing.length === 0) return;
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, full_name, email, avatar_url")
-      .in("id", missing);
+    const results = await Promise.all(
+      missing.map(async (participantId) => {
+        try {
+          const response = await fetch("/api/messages/participant-profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ participantId }),
+          });
+          if (!response.ok) return null;
+          const curr = await response.json();
+          return { id: curr.id as string, name: curr.full_name, email: curr.email, avatar_url: curr.avatar_url };
+        } catch {
+          return null;
+        }
+      })
+    );
 
-    if (error || !data) return;
-
-    const lookup = (data as any[]).reduce((acc: Record<string, PartnerProfile>, curr) => {
-      acc[curr.id] = { name: curr.full_name, email: curr.email, avatar_url: curr.avatar_url };
+    const lookup = results.reduce((acc: Record<string, PartnerProfile>, curr) => {
+      if (!curr) return acc;
+      acc[curr.id] = { name: curr.name, email: curr.email, avatar_url: curr.avatar_url };
       return acc;
     }, {});
 
@@ -680,6 +692,7 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
   const handleSend = async () => {
     if (!selectedConversation || !messageDraft.trim()) return;
     setSending(true);
+    setSendError(null);
     try {
       const {
         data: { session },
@@ -744,6 +757,7 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
       setMessageDraft("");
     } catch (err: any) {
       console.error("Failed to send message", err.message ?? err);
+      setSendError("Message couldn't be sent. Please try again.");
     } finally {
       setSending(false);
     }
@@ -1005,6 +1019,9 @@ export function MessagesPanel({ role }: MessagesPanelProps) {
                 onSubmit={handleSubmit}
                 className="border-t border-slate-200 bg-white px-6 py-4"
               >
+                {sendError ? (
+                  <p className="mb-2 text-xs font-medium text-rose-600">{sendError}</p>
+                ) : null}
                 <div className="flex items-end gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 shadow-sm">
                   <Textarea
                     value={messageDraft}

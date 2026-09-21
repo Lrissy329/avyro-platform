@@ -149,3 +149,78 @@ export async function listOverlappingSharedGroupsWithOccupancy(
     } satisfies SharedGroupWithOccupancy;
   });
 }
+
+const addDaysToIsoDate = (isoDate: string, days: number): string => {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, (month ?? 1) - 1, (day ?? 1) + days));
+  return date.toISOString().slice(0, 10);
+};
+
+export type SharedListingCapacityCheck = {
+  ok: boolean;
+  listingTotalSpots: number;
+  worstNightOccupancy: number;
+  worstNightDate: string | null;
+};
+
+// Aggregate physical-capacity check across ALL overlapping shared_groups for
+// a listing, not just one group. shared_total_spots is the listing's real
+// capacity -- two different groups with overlapping date ranges must never
+// jointly exceed it on any shared night, even though each group's own
+// total_spots is independently set to the full listing capacity (see
+// pages/api/shared-groups/checkout.ts).
+//
+// "closed" groups are deliberately included in the occupancy sum (per
+// product decision): closed means "not joinable", not "guests vacated" --
+// their confirmed/pending members still physically occupy spots and must
+// still count. Callers that only want *joinable* groups (guest-facing
+// discovery) filter status separately; this function only computes whether
+// there is room, not who can join.
+//
+// This is an advisory/UX-layer check only -- it is not a substitute for
+// DB-level enforcement under concurrency (see Stage 2 migration design).
+export async function checkListingSharedCapacityForRange(
+  supabase: SupabaseLike,
+  params: {
+    listingId: string;
+    startDate: string; // inclusive, YYYY-MM-DD
+    endDate: string; // exclusive, YYYY-MM-DD
+    listingTotalSpots: number;
+    additionalOccupants?: number;
+  }
+): Promise<SharedListingCapacityCheck> {
+  const { listingId, startDate, endDate, listingTotalSpots, additionalOccupants = 1 } = params;
+
+  const overlappingGroups = await listOverlappingSharedGroupsWithOccupancy(supabase, {
+    listingId,
+    windowStart: startDate,
+    windowEnd: endDate,
+    statuses: ["open", "full", "closed"],
+    cleanupExpiredPending: true,
+  });
+
+  let worstNightOccupancy = 0;
+  let worstNightDate: string | null = null;
+
+  let night = startDate;
+  while (night < endDate) {
+    const nightOccupancy = overlappingGroups.reduce((sum, group) => {
+      if (group.startDate <= night && night < group.endDate) {
+        return sum + group.active;
+      }
+      return sum;
+    }, 0);
+    if (nightOccupancy > worstNightOccupancy) {
+      worstNightOccupancy = nightOccupancy;
+      worstNightDate = night;
+    }
+    night = addDaysToIsoDate(night, 1);
+  }
+
+  return {
+    ok: worstNightOccupancy + additionalOccupants <= listingTotalSpots,
+    listingTotalSpots,
+    worstNightOccupancy,
+    worstNightDate,
+  };
+}

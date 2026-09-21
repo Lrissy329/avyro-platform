@@ -1,3 +1,5 @@
+import { canSelfCancelBooking } from "@/lib/bookingStatus";
+
 export type GuestBookingStatus =
   | "pending"
   | "awaiting_payment"
@@ -233,13 +235,5 @@ export const isAwaitingPayment = (status?: string | null, stripeStatus?: string 
   return key === "awaiting_payment" || key === "approved" || key === "payment_failed";
 };
 
-export const canGuestCancel = (status?: string | null, stripeStatus?: string | null) => {
-  const key = resolvePaymentStatus(status, stripeStatus);
-  return (
-    key === "pending" ||
-    key === "awaiting_payment" ||
-    key === "approved" ||
-    key === "confirmed" ||
-    key === "paid"
-  );
-};
+export const canGuestCancel = (status?: string | null, stripeStatus?: string | null) =>
+  canSelfCancelBooking(status, stripeStatus);

@@ -53,11 +53,11 @@ export function StartSharedGroupModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Start a new crew stay</DialogTitle>
           <DialogDescription>
-            Select your weeks. You’ll secure the first spot and others can join automatically.
+            Select your weeks. You’ll secure the first space and others can join automatically.
           </DialogDescription>
         </DialogHeader>
 

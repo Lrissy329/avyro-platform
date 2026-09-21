@@ -10,7 +10,9 @@ import {
   computeRoundedGuestPricing,
   computeSharedPerPersonWeeklyPricePence,
 } from "@/lib/pricing";
+import { withTransportSummaries } from "@/lib/transportSummaries";
 import { supabase } from "@/lib/supabaseClient";
+import { DAY_USE_AVAILABLE } from "@/lib/launchFeatures";
 
 const MapView = dynamic(() => import("@/components/map"), { ssr: false });
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
@@ -28,6 +30,12 @@ const airportCoords: Record<string, [number, number]> = {
   BHX: [-1.748, 52.4539],
   DUB: [-6.2701, 53.4213],
 };
+// The crew-rest filters (Low-noise, Blackout blinds, 24/7 access) and "Max minutes to airport" read
+// listings columns that do not exist in the live database (quiet_for_rest, blackout_blinds,
+// access_24_7, drive_minutes_offpeak), and no host screen fills them in. Using them made search fail,
+// so they stay off until the columns exist and hosts can set them. Flip to true to bring them back.
+const ENABLE_CREW_REST_FILTERS = false;
+
 const AIRPORT_OPTIONS = [
   { code: "STN", label: "London Stansted" },
   { code: "LHR", label: "London Heathrow" },
@@ -204,6 +212,8 @@ const getSearchPriceValue = (
 export default function SearchPage() {
   const { query, replace } = useRouter();
   const [listings, setListings] = useState<SearchListing[]>([]);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -226,7 +236,10 @@ export default function SearchPage() {
       checkOut: get("checkOut"),
       checkInTime: get("checkInTime"),
       checkOutTime: get("checkOutTime"),
-      bookingUnit: get("bookingUnit") || get("booking_unit"),
+      bookingUnit: (() => {
+        const value = get("bookingUnit") || get("booking_unit");
+        return !DAY_USE_AVAILABLE && value === "hourly" ? "" : value;
+      })(),
       adults: get("adults"),
       children: get("children"),
       infants: get("infants"),
@@ -307,10 +320,7 @@ export default function SearchPage() {
       q.priceMax,
       q.roomType,
       q.shared_stays,
-      q.quiet,
-      q.blackout,
-      q.access_24_7,
-      q.commute_max,
+      ...(ENABLE_CREW_REST_FILTERS ? [q.quiet, q.blackout, q.access_24_7, q.commute_max] : []),
     ];
     return flags.filter((value) => {
       if (value == null) return false;
@@ -472,6 +482,7 @@ export default function SearchPage() {
         : "nightly";
     const values = listings
       .map((listing) => {
+        if (Boolean((listing as any).isSharedStay)) return null;
         const value = getSearchPriceValue(listing, unit);
         return typeof value === "number" && Number.isFinite(value) ? value : null;
       })
@@ -499,6 +510,8 @@ export default function SearchPage() {
 
   const priceSliderMin = Math.floor(priceHistogram.min / 10) * 10 || 0;
   const priceSliderMax = Math.ceil(priceHistogram.max / 10) * 10 || 500;
+  // With one price (or a tiny spread) a range slider has nothing to show, so only the number boxes remain.
+  const hasPriceSpread = priceHistogram.max - priceHistogram.min >= 20;
   const priceStep = 5;
   const priceMinValue = Math.max(
     priceSliderMin,
@@ -576,6 +589,7 @@ export default function SearchPage() {
         : (["nightly", "crashpad", "day_use", "split_rest"] as const);
 
     const fetchListings = async () => {
+      setSearchError(null);
       try {
         if (!airportCode) {
           setListings([]);
@@ -624,25 +638,31 @@ export default function SearchPage() {
           if (val === true) queryBuilder = queryBuilder.eq(field, true);
         });
 
-        const commuteMax = q.commute_max ? Number(q.commute_max) : NaN;
+        const commuteMax = ENABLE_CREW_REST_FILTERS && q.commute_max ? Number(q.commute_max) : NaN;
         if (!Number.isNaN(commuteMax)) {
           queryBuilder = queryBuilder.lte("drive_minutes_offpeak", commuteMax);
         }
 
         // Crew rest flags
-        if (toBool(q.blackout) === true) queryBuilder = queryBuilder.eq("blackout_blinds", true);
-        if (toBool(q.quiet) === true) queryBuilder = queryBuilder.eq("quiet_for_rest", true);
-        if (toBool(q.access_24_7) === true) queryBuilder = queryBuilder.eq("access_24_7", true);
+        if (ENABLE_CREW_REST_FILTERS) {
+          if (toBool(q.blackout) === true) queryBuilder = queryBuilder.eq("blackout_blinds", true);
+          if (toBool(q.quiet) === true) queryBuilder = queryBuilder.eq("quiet_for_rest", true);
+          if (toBool(q.access_24_7) === true) queryBuilder = queryBuilder.eq("access_24_7", true);
+        }
 
         const { data, error } = await queryBuilder;
         if (error) {
           if (__DEV__) console.error("[search] supabase query error", error);
           setListings([]);
+          setSearchError("We couldn't load stays right now.");
           return;
         }
 
         const rows = Array.isArray(data) ? data : [];
-        const validRows = rows.filter((row: any) => row?.id != null);
+        const validRows = await withTransportSummaries(
+          supabase,
+          rows.filter((row: any) => row?.id != null)
+        );
         const normalized: SearchListing[] = validRows.map((l: any) => {
           const id = String(l.id);
           const airport_code = (l.airport_code ?? l.airport ?? l.iata) as string | undefined;
@@ -821,6 +841,8 @@ export default function SearchPage() {
             }
             return false;
           }
+          // Shared stays are priced per person per week, so a £/night range does not apply to them.
+          if (Boolean(listing.isSharedStay)) return true;
           if (!Number.isNaN(priceMin) && listingPrice < priceMin) return false;
           if (!Number.isNaN(priceMax) && listingPrice > priceMax) return false;
           return true;
@@ -860,6 +882,7 @@ export default function SearchPage() {
               });
             }
             setListings([]);
+            setSearchError("We couldn't load stays right now.");
             return;
           }
 
@@ -1030,11 +1053,12 @@ export default function SearchPage() {
       } catch (err) {
         if (__DEV__) console.error("[search] fetch failed", err);
         setListings([]);
+        setSearchError("We couldn't load stays right now.");
       }
     };
 
     fetchListings();
-  }, [q, boundsFilter, airportCode]);
+  }, [q, boundsFilter, airportCode, retryToken]);
 
   // Map center (unchanged)
   const center = useMemo(() => {
@@ -1133,28 +1157,28 @@ export default function SearchPage() {
       });
     }
 
-    if (toBool(q.quiet) === true) {
+    if (ENABLE_CREW_REST_FILTERS && toBool(q.quiet) === true) {
       items.push({
         key: "quiet",
         label: "Low-noise environment",
         onClear: () => updateQuery({ quiet: undefined }),
       });
     }
-    if (toBool(q.blackout) === true) {
+    if (ENABLE_CREW_REST_FILTERS && toBool(q.blackout) === true) {
       items.push({
         key: "blackout",
         label: "Blackout blinds",
         onClear: () => updateQuery({ blackout: undefined }),
       });
     }
-    if (toBool(q.access_24_7) === true) {
+    if (ENABLE_CREW_REST_FILTERS && toBool(q.access_24_7) === true) {
       items.push({
         key: "access",
         label: "24/7 access",
         onClear: () => updateQuery({ access_24_7: undefined }),
       });
     }
-    if (q.commute_max) {
+    if (ENABLE_CREW_REST_FILTERS && q.commute_max) {
       items.push({
         key: "commute",
         label: `Max ${q.commute_max} min`,
@@ -1238,9 +1262,55 @@ export default function SearchPage() {
     console.log("[search] listings count:", listings.length, "center:", safeCenter);
   }
 
+  const filtersButton = (
+    <button
+      type="button"
+      onClick={() => setFilterOpen(true)}
+      className="inline-flex h-9 shrink-0 items-center gap-2 rounded-full border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 transition hover:border-slate-500 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4" aria-hidden>
+        <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+        <circle cx="16" cy="7" r="2" />
+        <circle cx="8" cy="17" r="2" />
+      </svg>
+      Filters
+      {activeFilterCount > 0 && (
+        <span className="rounded-full bg-[#FEDD02] px-1.5 py-0.5 text-[11px] font-semibold text-black">
+          {activeFilterCount}
+        </span>
+      )}
+    </button>
+  );
+
+  const activeFilterChips =
+    activeFilters.length > 0 ? (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {activeFilters.map((filter) => (
+          <button
+            key={filter.key}
+            type="button"
+            onClick={filter.onClear}
+            className="inline-flex h-7 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:border-slate-400 hover:bg-slate-50"
+          >
+            {filter.label}
+            <span className="text-slate-400">×</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={clearFiltersExceptAirport}
+          className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+        >
+          Clear all
+        </button>
+      </div>
+    ) : null;
+
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <header className="sticky top-16 z-40 border-b border-slate-200/90 bg-white/94 backdrop-blur-md">
+      {/* Phones/tablets: search + filters live in a sticky row under the site header. On large
+          screens the search is in the site header and filters move into the results column. */}
+      <header className="sticky top-16 z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-md lg:hidden">
         <div className="w-full px-4 py-2.5 lg:px-5 lg:py-2">
           <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(460px,550px)_minmax(0,1fr)] lg:items-start">
             <div className="min-w-0 lg:hidden">
@@ -1266,41 +1336,9 @@ export default function SearchPage() {
             </div>
             <div className="hidden lg:block" />
             <div className="min-w-0">
-              <div className="flex min-h-[40px] flex-wrap items-center gap-1.5 rounded-full border border-slate-200/80 bg-white/90 px-2.5 py-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
-                <button
-                  type="button"
-                  onClick={() => setFilterOpen(true)}
-                  className="inline-flex h-8 items-center gap-2 rounded-full border border-slate-300 px-3 text-[12px] font-medium text-slate-800 hover:border-slate-500"
-                >
-                  Filters
-                  {activeFilterCount > 0 && (
-                    <span className="rounded-full bg-[#FEDD02] px-1.5 py-0.5 text-[11px] font-semibold text-black">
-                      {activeFilterCount}
-                    </span>
-                  )}
-                </button>
-                {activeFilters.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {activeFilters.map((filter) => (
-                      <button
-                        key={filter.key}
-                        type="button"
-                        onClick={filter.onClear}
-                        className="inline-flex h-7 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:border-slate-400"
-                      >
-                        {filter.label}
-                        <span className="text-slate-400">×</span>
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={clearFiltersExceptAirport}
-                      className="rounded-full border border-slate-200 px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:border-slate-400"
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                )}
+              <div className="flex min-h-[40px] flex-wrap items-center gap-1.5">
+                {filtersButton}
+                {activeFilterChips}
               </div>
             </div>
           </div>
@@ -1309,12 +1347,23 @@ export default function SearchPage() {
 
       <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-[minmax(460px,550px)_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col border-r border-slate-200">
+          <div className="hidden border-b border-slate-200/80 px-5 py-3 lg:block">
+            <div className="flex items-center justify-between gap-3">
+              {filtersButton}
+              {airportCode ? (
+                <p className="text-[13px] text-slate-600">
+                  <span className="font-semibold text-slate-900">{listings.length}</span>{" "}
+                  {listings.length === 1 ? "stay" : "stays"} near {airportName}
+                </p>
+              ) : null}
+            </div>
+            {activeFilterChips ? <div className="mt-2.5">{activeFilterChips}</div> : null}
+          </div>
           <div ref={resultsRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3.5 lg:px-5 lg:py-3.5">
             {airportCode && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-[13px] text-slate-700">
-                <span className="font-semibold">{listings.length}</span> stays near{" "}
-                <span className="font-mono tabular-nums">{airportCode}</span>. All listings meet
-                enforced booking rules.
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-[13px] text-slate-700 lg:hidden">
+                <span className="font-semibold">{listings.length}</span>{" "}
+                {listings.length === 1 ? "stay" : "stays"} near {airportName}
               </div>
             )}
             {!airportCode && (
@@ -1346,7 +1395,24 @@ export default function SearchPage() {
               </div>
             )}
 
-            {airportCode && listings.length === 0 && (
+            {airportCode && searchError && (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+                <div className="text-base font-semibold text-rose-900">{searchError}</div>
+                <p className="mt-1 text-sm text-rose-700">
+                  This isn&apos;t a lack of availability — something went wrong loading results.
+                </p>
+                <div className="mt-3">
+                  <button
+                    onClick={() => setRetryToken((token) => token + 1)}
+                    className="rounded-full border border-rose-300 bg-white px-3 py-2 text-sm font-medium text-rose-800 hover:border-rose-500"
+                  >
+                    Try again
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {airportCode && !searchError && listings.length === 0 && (
               <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
                 <div className="text-base font-semibold text-slate-900">
                   {emptyModeLabel
@@ -1379,12 +1445,14 @@ export default function SearchPage() {
                   >
                     Clear filters
                   </button>
-                  <button
-                    onClick={() => updateQuery({ commute_max: 30 })}
-                    className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium hover:border-slate-500"
-                  >
-                    Increase commute limit
-                  </button>
+                  {ENABLE_CREW_REST_FILTERS ? (
+                    <button
+                      onClick={() => updateQuery({ commute_max: 30 })}
+                      className="rounded-full border border-slate-300 px-3 py-2 text-sm font-medium hover:border-slate-500"
+                    >
+                      Increase commute limit
+                    </button>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -1517,7 +1585,7 @@ export default function SearchPage() {
                 <div className="mt-3 flex gap-2">
                   {[
                     { value: "nightly", label: "Overnight" },
-                    { value: "hourly", label: "Day-use" },
+                    ...(DAY_USE_AVAILABLE ? [{ value: "hourly", label: "Day-use" }] : []),
                   ].map((option) => (
                     <button
                       key={option.value}
@@ -1549,7 +1617,7 @@ export default function SearchPage() {
                     <span>Min (£/{draftPriceUnit})</span>
                     <input
                       type="number"
-                      placeholder="0"
+                      placeholder={hasPriceSpread ? String(priceSliderMin) : "0"}
                       value={draftFilters.priceMin}
                       onChange={(e) =>
                         setDraftFilters((prev) => ({ ...prev, priceMin: e.target.value }))
@@ -1561,7 +1629,7 @@ export default function SearchPage() {
                     <span>Max (£/{draftPriceUnit})</span>
                     <input
                       type="number"
-                      placeholder="200"
+                      placeholder={hasPriceSpread ? String(priceSliderMax) : "No max"}
                       value={draftFilters.priceMax}
                       onChange={(e) =>
                         setDraftFilters((prev) => ({ ...prev, priceMax: e.target.value }))
@@ -1570,6 +1638,12 @@ export default function SearchPage() {
                     />
                   </label>
                 </div>
+                {listings.some((listing) => Boolean((listing as any).isSharedStay)) ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Shared stays are priced per person per week, so this range doesn&apos;t apply to them.
+                  </p>
+                ) : null}
+                {hasPriceSpread ? (
                 <div className="mt-4">
                   <div className="relative h-16">
                     <div className="absolute inset-0 flex items-end gap-1">
@@ -1619,6 +1693,7 @@ export default function SearchPage() {
                     </div>
                   </div>
                 </div>
+                ) : null}
               </div>
 
               <div>
@@ -1673,7 +1748,9 @@ export default function SearchPage() {
                     label: "24/7 access",
                     helper: "Late arrivals and early departures.",
                   },
-                ].map((option) => (
+                ]
+                  .filter((option) => ENABLE_CREW_REST_FILTERS || option.key === "sharedStays")
+                  .map((option) => (
                   option.key === "sharedStays" ? (
                     <SharedStayFilter
                       key={option.key}
@@ -1707,6 +1784,7 @@ export default function SearchPage() {
                 ))}
               </div>
 
+              {ENABLE_CREW_REST_FILTERS ? (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                   Max minutes to airport — {draftFilters.commuteMax || 30} min
@@ -1725,6 +1803,7 @@ export default function SearchPage() {
                   />
                 </div>
               </div>
+              ) : null}
             </div>
             <div className="flex items-center justify-between border-t border-slate-200 px-5 py-4">
               <button

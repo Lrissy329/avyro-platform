@@ -13,6 +13,7 @@ import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { type ListingReadiness, evaluateListingReadiness } from "@/lib/listingReadiness";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import type { OpsRole } from "@/lib/opsRbac";
+import { formatOpsShortDateTime } from "@/lib/opsDateFormat";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 
 type BookingRow = {
@@ -153,23 +154,7 @@ const parseDate = (value?: string | null) => {
   return Number.isFinite(date.getTime()) ? date : null;
 };
 
-const DASHBOARD_DATE_TIME = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London",
-  day: "2-digit",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-const formatDateTime = (value?: string | null) => {
-  const date = parseDate(value);
-  if (!date) return "—";
-  const parts = Object.fromEntries(
-    DASHBOARD_DATE_TIME.formatToParts(date).map((part) => [part.type, part.value])
-  );
-  return `${parts.day ?? ""} ${parts.month ?? ""} ${parts.hour ?? ""}:${parts.minute ?? ""}`.trim();
-};
+const formatDateTime = (value?: string | null) => formatOpsShortDateTime(value);
 
 const formatCurrency = (amountPence: number, currency = "GBP") =>
   new Intl.NumberFormat("en-GB", {

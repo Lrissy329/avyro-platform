@@ -5,7 +5,8 @@ import { useRouter } from "next/router";
 import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
-import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
+import { isPaidFinalBookingStatus, isStripePaidStatus, canSelfCancelBooking } from "@/lib/bookingStatus";
+import { SUPPORT_EMAIL } from "@/lib/support";
 import GuestProfilePreviewCard from "@/components/profile/GuestProfilePreviewCard";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/lib/supabaseClient";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { getHostStripeReadiness } from "@/lib/hostStripeReadiness";
 import { ReviewFormModal } from "@/components/reviews/ReviewFormModal";
 
 type BookingRow = {
@@ -69,7 +71,7 @@ type PageProps = {
   hostNote: string | null;
   stripeMeta: {
     accountId: string | null;
-    onboardingStatus: string | null;
+    ready: boolean;
   };
 };
 
@@ -238,11 +240,10 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
     console.warn("[host booking] failed to load notes", noteError.message);
   }
 
-  const { data: stripeRow } = await admin
-    .from("profiles")
-    .select("stripe_account_id, stripe_onboarding_status")
-    .eq("id", session.user.id)
-    .maybeSingle();
+  const stripeReadiness = await getHostStripeReadiness(session.user.id).catch((err) => {
+    console.error("[host booking detail] failed to load stripe readiness", err?.message ?? err);
+    return { ready: false, stripeAccountId: null, chargesEnabled: false, payoutsEnabled: false };
+  });
 
   return {
     props: {
@@ -252,8 +253,8 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
       conversationId: conversationRow?.id ?? null,
       hostNote,
       stripeMeta: {
-        accountId: (stripeRow as any)?.stripe_account_id ?? null,
-        onboardingStatus: (stripeRow as any)?.stripe_onboarding_status ?? null,
+        accountId: stripeReadiness.stripeAccountId,
+        ready: stripeReadiness.ready,
       },
     },
   };
@@ -310,10 +311,9 @@ export default function HostBookingDetailPage({
       ? Math.floor((guestTotalPence * stripeVarBps) / 10000) + stripeFixedPence
       : null;
 
-  const canCancel =
-    status === "awaiting_payment" ||
-    status === "pending_payment" ||
-    isPaidFinalBookingStatus(status);
+  const canCancel = canSelfCancelBooking(status, booking?.stripe_status ?? null);
+  const requiresSupportToCancel =
+    !canCancel && (isPaidFinalBookingStatus(status) || isStripePaidStatus(booking?.stripe_status));
 
   const loadReviewEligibility = useCallback(async () => {
     if (!booking?.id) return;
@@ -483,7 +483,7 @@ export default function HostBookingDetailPage({
     ? booking.stripe_payment_intent_id.slice(-6)
     : null;
 
-  const stripeConnected = stripeMeta.onboardingStatus === "complete";
+  const stripeConnected = stripeMeta.ready;
 
   const timelineItems = useMemo(() => {
     const items: Array<{ label: string; time?: string | null }> = [];
@@ -565,6 +565,14 @@ export default function HostBookingDetailPage({
                 >
                   {canceling ? "Cancelling…" : "Cancel booking"}
                 </Button>
+              ) : requiresSupportToCancel ? (
+                <p className="text-xs text-slate-500">
+                  This booking is paid. Contact{" "}
+                  <a href={`mailto:${SUPPORT_EMAIL}`} className="font-semibold underline">
+                    {SUPPORT_EMAIL}
+                  </a>{" "}
+                  to cancel.
+                </p>
               ) : null}
             </div>
           </div>

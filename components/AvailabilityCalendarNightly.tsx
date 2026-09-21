@@ -15,6 +15,8 @@ type AvailabilityCalendarNightlyProps = {
   variant?: "default" | "inline";
 };
 
+// Minimum width the inline calendar needs to show two months side by side (cells stay ~35px+).
+const INLINE_TWO_MONTH_MIN_WIDTH = 520;
 const WINDOW_DAYS = 90;
 const EXTEND_DAYS = 60;
 
@@ -67,6 +69,7 @@ export default function AvailabilityCalendarNightly({
   const [calendarMonths, setCalendarMonths] = useState(2);
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const latestAvailabilityRequestIdRef = useRef(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setWindowStart(startOfDay(new Date()));
@@ -74,6 +77,18 @@ export default function AvailabilityCalendarNightly({
   }, [listingId]);
 
   useEffect(() => {
+    // The inline calendar sits in a column whose width does not follow the screen width, so it decides
+    // between one and two months from its own width. (Two months forced into a narrow column used to
+    // stretch the layout and push the booking widget sideways.)
+    if (variant === "inline" && typeof ResizeObserver !== "undefined" && rootRef.current) {
+      const node = rootRef.current;
+      const update = () =>
+        setCalendarMonths(node.getBoundingClientRect().width >= INLINE_TWO_MONTH_MIN_WIDTH ? 2 : 1);
+      update();
+      const observer = new ResizeObserver(update);
+      observer.observe(node);
+      return () => observer.disconnect();
+    }
     const media = window.matchMedia(
       variant === "inline" ? "(min-width: 1280px)" : "(min-width: 1024px)"
     );
@@ -288,7 +303,7 @@ export default function AvailabilityCalendarNightly({
   };
 
   return (
-    <div data-availability-loading={availabilityLoading ? "true" : "false"}>
+    <div ref={rootRef} data-availability-loading={availabilityLoading ? "true" : "false"}>
       <DatePicker
         inline
         selectsRange

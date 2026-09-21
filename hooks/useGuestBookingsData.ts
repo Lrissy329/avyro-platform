@@ -120,17 +120,24 @@ async function loadListingsForBookings(
 async function loadHostsForBookings(hostIds: string[]): Promise<Record<string, GuestHostRecord>> {
   if (hostIds.length === 0) return {};
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, full_name, email, avatar_url")
-    .in("id", hostIds);
+  const results = await Promise.all(
+    hostIds.map(async (hostId) => {
+      try {
+        const response = await fetch("/api/guest/bookings/host-profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hostId }),
+        });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        return payload as GuestHostRecord;
+      } catch {
+        return null;
+      }
+    })
+  );
 
-  if (error) {
-    throw new Error(error.message || "Unable to load host details.");
-  }
-
-  const rows = (Array.isArray(data) ? data : []) as GuestHostRecord[];
-  return rows.reduce<Record<string, GuestHostRecord>>((acc, row) => {
+  return results.reduce<Record<string, GuestHostRecord>>((acc, row) => {
     if (!row?.id) return acc;
     acc[row.id] = row;
     return acc;

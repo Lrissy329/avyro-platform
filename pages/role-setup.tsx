@@ -113,7 +113,6 @@ export default function RoleSetupPage() {
         .upsert(
           {
             id: session.user.id,
-            email: session.user.email ?? null,
             ...updates,
           },
           { onConflict: "id" }

@@ -15,7 +15,7 @@ export function SharedStayFilter({ checked, onChange, className = "" }: SharedSt
       />
       <span>
         <span className="block font-medium text-slate-800">Shared stays</span>
-        <span className="block text-xs text-slate-500">Join an existing group or start a new one.</span>
+        <span className="block text-xs text-slate-500">Join an existing shared stay or start a new one.</span>
       </span>
     </label>
   );

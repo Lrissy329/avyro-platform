@@ -15,9 +15,10 @@ export default function HostProfilePage() {
   const [loading, setLoading] = useState(true);
   const [stripeMeta, setStripeMeta] = useState<{
     accountId: string | null;
-    onboardingStatus: string | null;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
     emailVerified: boolean;
-  }>({ accountId: null, onboardingStatus: null, emailVerified: false });
+  }>({ accountId: null, chargesEnabled: false, payoutsEnabled: false, emailVerified: false });
 
   const loadProfile = async () => {
     const {
@@ -34,7 +35,7 @@ export default function HostProfilePage() {
     const { data: profileRow } = await supabase
       .from("profiles")
       .select(
-        "id, full_name, avatar_url, verification_level, verification_status, display_name, bio, stripe_account_id, stripe_onboarding_status"
+        "id, full_name, avatar_url, verification_level, verification_status, display_name, bio, stripe_account_id, charges_enabled, payouts_enabled"
       )
       .eq("id", user.id)
       .single();
@@ -60,7 +61,8 @@ export default function HostProfilePage() {
     });
     setStripeMeta({
       accountId: (profileRow as any)?.stripe_account_id ?? null,
-      onboardingStatus: (profileRow as any)?.stripe_onboarding_status ?? null,
+      chargesEnabled: (profileRow as any)?.charges_enabled === true,
+      payoutsEnabled: (profileRow as any)?.payouts_enabled === true,
       emailVerified: Boolean(user.email_confirmed_at || (user as any).confirmed_at),
     });
     setLoading(false);
@@ -150,14 +152,14 @@ export default function HostProfilePage() {
             </Badge>
             <Badge
               className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                stripeMeta.onboardingStatus === "complete"
+                stripeMeta.chargesEnabled && stripeMeta.payoutsEnabled
                   ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                   : stripeMeta.accountId
                     ? "bg-amber-50 text-amber-700 border-amber-200"
                     : "bg-slate-50 text-slate-500 border-slate-200"
               }`}
             >
-              {stripeMeta.onboardingStatus === "complete"
+              {stripeMeta.chargesEnabled && stripeMeta.payoutsEnabled
                 ? "Stripe connected"
                 : stripeMeta.accountId
                   ? "Stripe setup incomplete"

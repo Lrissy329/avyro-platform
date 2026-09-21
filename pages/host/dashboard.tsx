@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { GetServerSideProps } from "next";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
@@ -10,6 +11,7 @@ import { HostPageHeader } from "@/components/host/HostPageHeader";
 import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { evaluateListingReadiness, type ListingReadiness } from "@/lib/listingReadiness";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { getHostStripeReadiness } from "@/lib/hostStripeReadiness";
 
 const HostEarningsChart = dynamic(
   () => import("@/components/host/HostEarningsChart").then((mod) => mod.HostEarningsChart),
@@ -59,7 +61,7 @@ type EarningsDatum = {
 
 type StripeSnapshot = {
   accountId: string | null;
-  onboardingStatus: string | null;
+  ready: boolean;
 };
 
 type SummaryMetrics = {
@@ -275,15 +277,10 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
     bookings = [];
   }
 
-  const { data: profileRow, error: profileError } = await admin
-    .from("profiles")
-    .select("stripe_account_id, stripe_onboarding_status")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (profileError) {
-    console.error("[host dashboard] failed to load stripe profile", profileError.message);
-  }
+  const stripeReadiness = await getHostStripeReadiness(userId).catch((err) => {
+    console.error("[host dashboard] failed to load stripe readiness", err?.message ?? err);
+    return { ready: false, stripeAccountId: null, chargesEnabled: false, payoutsEnabled: false };
+  });
 
   const now = new Date();
   const currentMonthStart = monthStart(now);
@@ -444,7 +441,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
     pendingActions:
       pendingBookings.length +
       payoutFailures.length +
-      (profileRow?.stripe_account_id && profileRow?.stripe_onboarding_status !== "complete" ? 1 : 0),
+      (stripeReadiness.stripeAccountId && !stripeReadiness.ready ? 1 : 0),
     awaitingPayoutCount: awaitingPayoutRows.length,
     awaitingPayoutPence,
     releasedPayoutCount: releasedPayouts.length,
@@ -458,8 +455,8 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
       summary,
       earningsData,
       stripe: {
-        accountId: (profileRow as any)?.stripe_account_id ?? null,
-        onboardingStatus: (profileRow as any)?.stripe_onboarding_status ?? null,
+        accountId: stripeReadiness.stripeAccountId,
+        ready: stripeReadiness.ready,
       },
       upcomingStays,
     },
@@ -474,6 +471,14 @@ export default function HostDashboardPage({
   upcomingStays,
 }: PageProps) {
   const [showSharedStayGuide, setShowSharedStayGuide] = useState(false);
+  const router = useRouter();
+  // create-account-link.ts redirects back here with ?onboarding=return|refresh --
+  // previously unread anywhere, so a host returning from Stripe saw no
+  // acknowledgment at all. Message is driven by the real stripeConnected
+  // state (computed below), not just the param's presence, so this never
+  // claims "connected" before Stripe has actually confirmed it.
+  const onboardingReturn = router.query.onboarding === "return";
+  const onboardingRefresh = router.query.onboarding === "refresh";
 
   const sharedListings = listings.filter((listing) => Boolean(listing.is_shared_stay));
   const newestSharedListing = sharedListings[0] ?? null;
@@ -486,7 +491,7 @@ export default function HostDashboardPage({
       newestSharedCreatedAt != null &&
       Date.now() - newestSharedCreatedAt <= 14 * 24 * 60 * 60 * 1000);
 
-  const stripeConnected = Boolean(stripe.accountId) && stripe.onboardingStatus === "complete";
+  const stripeConnected = stripe.ready;
   const stripeLabel = stripeConnected
     ? "Connected"
     : stripe.accountId
@@ -513,10 +518,13 @@ export default function HostDashboardPage({
     AIRPORT_NAMES[featuredReadyAirportCode] ??
     (featuredReadyAirportCode ? `${featuredReadyAirportCode} airport area` : "the airport area");
   const primaryListingIssue =
+    listings.length === 0 ? "Create your first listing to appear in search." : null;
+  const primaryListingReasons =
     listings.length === 0
-      ? "Create your first listing to appear in search."
-      : unreadyListings[0]?.readiness.reasons[0] ??
-        "Complete pricing, airport and payout setup to receive bookings.";
+      ? []
+      : unreadyListings[0]?.readiness.reasons ?? [
+          "Complete pricing, airport and payout setup to receive bookings.",
+        ];
 
   return (
     <HostShellLayout title="Hosting insights" activeNav="dashboard">
@@ -541,6 +549,18 @@ export default function HostDashboardPage({
             </>
           }
         />
+
+        {onboardingReturn ? (
+          <Card className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800">
+            {stripeConnected
+              ? "Stripe setup complete — you're ready to receive payouts."
+              : "Thanks for completing Stripe's form. We're confirming your account now — this can take a few minutes. Refresh this page to check again."}
+          </Card>
+        ) : onboardingRefresh ? (
+          <Card className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-800">
+            Your Stripe setup link expired before you finished. Reconnect Stripe below to try again.
+          </Card>
+        ) : null}
 
         <Card
           className={`rounded-2xl border p-5 shadow-sm ${
@@ -578,7 +598,18 @@ export default function HostDashboardPage({
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <p className="text-sm font-semibold text-amber-800">Your listing is created</p>
-                <p className="mt-1 text-sm text-amber-700">{primaryListingIssue}</p>
+                {primaryListingIssue ? (
+                  <p className="mt-1 text-sm text-amber-700">{primaryListingIssue}</p>
+                ) : (
+                  <ul className="mt-2 space-y-1 text-sm text-amber-700">
+                    {primaryListingReasons.map((reason) => (
+                      <li key={reason} className="flex items-start gap-1.5">
+                        <span aria-hidden="true">•</span>
+                        <span>{reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <Link
                 href="/host/listings"

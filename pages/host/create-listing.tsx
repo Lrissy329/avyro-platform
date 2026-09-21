@@ -942,9 +942,16 @@ export default function CreateListing() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ listingId }),
-        }).catch((err) => {
-          console.error("[create-listing] transport refresh failed", err);
-        });
+        })
+          .then((response) => {
+            // fetch only rejects on network errors; a Google/auth failure comes back as a non-OK response.
+            if (!response.ok) {
+              console.warn("[create-listing] travel times not calculated yet", response.status);
+            }
+          })
+          .catch((err) => {
+            console.error("[create-listing] transport refresh failed", err);
+          });
       }
 
       router.push("/host/dashboard");
@@ -2156,7 +2163,7 @@ export default function CreateListing() {
           <div className="flex items-center justify-between">
             <button
               type="button"
-              className="text-gray-500 text-base font-medium"
+              className="min-h-[44px] px-3 py-2 text-gray-500 text-base font-medium disabled:opacity-50"
               disabled={step === 0}
               onClick={() => setStep((s) => Math.max(0, s - 1))}
             >

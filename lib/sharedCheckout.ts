@@ -343,7 +343,21 @@ export async function finalizeSharedGroupCheckout(params: {
     nights,
     currency,
     price_total: amountPence / 100,
-    host_net_total_pence: amountPence,
+    // host_net_total_pence intentionally omitted: the provisional booking
+    // (pages/api/shared-groups/checkout.ts) already persists the correct,
+    // fee-derived host net at booking-creation time. Including amountPence
+    // (the guest charge) here previously overwrote that correct value
+    // during finalization -- omitting the key entirely means this update
+    // leaves the existing column untouched instead. This function has no
+    // platformFeeBps/applicationFeeAmount in scope to recompute it
+    // correctly, so it must not write to this column at all.
+    //
+    // Known narrow gap, not addressed here: if the provisional insert in
+    // checkout.ts ever failed and this function falls back to inserting a
+    // fresh booking row (persistedId null in persistSharedBooking below),
+    // host_net_total_pence will be left null/unset on that row rather than
+    // populated -- preferable to a silently wrong value, but still an open
+    // gap for that rare fallback path.
     guest_total_pence: amountPence,
     guest_unit_price_pence: guestUnitPricePence,
     booking_type: "shared_group",

@@ -8,6 +8,7 @@ import {
   roundGuestPricePenceToNearestFivePounds,
 } from "@/lib/pricing";
 import { stripe } from "@/lib/stripe";
+import { getHostStripeReadiness } from "@/lib/hostStripeReadiness";
 import type { BookingStayType } from "@/lib/calendarTypes";
 import {
   addDaysUtc,
@@ -209,6 +210,25 @@ export default async function handler(
       code: "SHARED_STAY_USE_SHARED_CHECKOUT",
     });
   }
+
+  // Host Stripe Connect readiness gate -- must run before the bookings row
+  // is inserted. bookings.no_overlap is a live EXCLUDE constraint that
+  // treats "awaiting_payment" as an active/blocking status, so inserting a
+  // booking row for a host who turns out not to be Stripe-ready would
+  // leave behind a phantom row that incorrectly blocks the listing's
+  // availability with no Checkout Session ever created for it.
+  const hostReadiness = await getHostStripeReadiness(listingRow.user_id);
+  if (!hostReadiness.ready || !hostReadiness.stripeAccountId) {
+    console.error("[api/bookings/create] host not ready for Stripe Connect charge", {
+      hostId: listingRow.user_id,
+      listingId,
+      stripeAccountId: hostReadiness.stripeAccountId,
+      chargesEnabled: hostReadiness.chargesEnabled,
+      payoutsEnabled: hostReadiness.payoutsEnabled,
+    });
+    return res.status(409).json({ error: "Host is not ready to accept payments.", code: "HOST_NOT_ONBOARDED" });
+  }
+  const hostStripeAccountId = hostReadiness.stripeAccountId;
 
   const stayType = resolveStayType(listingRow);
   if (!STAY_TYPES.includes(stayType)) {
@@ -728,46 +748,91 @@ export default async function handler(
     return res.status(500).json({ error: "guest_total_pence must be positive pence." });
   }
 
+  // application_fee_amount is derived from the booking row's own
+  // server-computed pricing (lib/pricing.ts), never recomputed here --
+  // guest_total_pence and host_net_total_pence are already authoritative,
+  // read back from the persisted row the same way guestTotalPence already
+  // is above, not from the pre-insert `pricing`/`hostNetTotalPence` locals.
+  const hostNetTotalPenceFromRow = Number(bookingRow.host_net_total_pence);
+  if (!Number.isInteger(hostNetTotalPenceFromRow)) {
+    console.error("[api/bookings/create] host_net_total_pence is not integer", {
+      raw: bookingRow.host_net_total_pence,
+      parsed: hostNetTotalPenceFromRow,
+      bookingId: bookingRow.id ?? null,
+    });
+    return res.status(500).json({ error: "host_net_total_pence must be integer pence." });
+  }
+
+  const applicationFeeAmount = guestTotalPence - hostNetTotalPenceFromRow;
+  if (
+    !Number.isInteger(applicationFeeAmount) ||
+    applicationFeeAmount < 0 ||
+    applicationFeeAmount > guestTotalPence
+  ) {
+    console.error("[api/bookings/create] computed application_fee_amount is invalid", {
+      guestTotalPence,
+      hostNetTotalPenceFromRow,
+      applicationFeeAmount,
+      bookingId: bookingRow.id ?? null,
+    });
+    return res.status(500).json({ error: "Invalid application fee amount computed for this booking." });
+  }
+
   const origin = resolveOrigin();
   const successUrl = `${origin}/booking/success?booking=${bookingRow.id}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${origin}/listing/${listingId}?payment=cancelled`;
 
   let session;
   try {
-    session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      currency: String(bookingRow.currency ?? "GBP").toLowerCase(),
-      customer_creation: "always",
-      payment_method_types: ["card"],
-      payment_intent_data: {
-        setup_future_usage: "off_session",
-      },
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: String(bookingRow.currency ?? "GBP").toLowerCase(),
-            unit_amount: guestTotalPence,
-            product_data: {
-              name: listingRow.title
-                ? `Stay at ${listingRow.title}`
-                : "Stay booking",
-            },
+    session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        currency: String(bookingRow.currency ?? "GBP").toLowerCase(),
+        customer_creation: "always",
+        payment_method_types: ["card"],
+        payment_intent_data: {
+          setup_future_usage: "off_session",
+          application_fee_amount: applicationFeeAmount,
+          transfer_data: {
+            destination: hostStripeAccountId,
           },
         },
-      ],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata: {
-        booking_id: bookingRow.id,
-        listing_id: listingId,
-        host_id: listingRow.user_id,
-        guest_id: userData.user.id,
-        flex_mode: useRollingFlex ? "rolling" : useFlexExtraNight ? "extra_night" : "none",
-        flex_min_nights: useRollingFlex ? String(flexMinNights) : "",
-        flex_max_nights: useRollingFlex ? String(flexMaxNights) : "",
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: String(bookingRow.currency ?? "GBP").toLowerCase(),
+              unit_amount: guestTotalPence,
+              product_data: {
+                name: listingRow.title
+                  ? `Stay at ${listingRow.title}`
+                  : "Stay booking",
+              },
+            },
+          },
+        ],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        // Inventory-reservation hold is capped at 30 minutes (product
+        // decision) -- an abandoned/unpaid attempt beyond this window is
+        // released by the checkout.session.expired handler in
+        // pages/api/stripe-webhook.ts rather than blocking the listing's
+        // dates for Stripe's 24h default.
+        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+        metadata: {
+          booking_id: bookingRow.id,
+          listing_id: listingId,
+          host_id: listingRow.user_id,
+          guest_id: userData.user.id,
+          flex_mode: useRollingFlex ? "rolling" : useFlexExtraNight ? "extra_night" : "none",
+          flex_min_nights: useRollingFlex ? String(flexMinNights) : "",
+          flex_max_nights: useRollingFlex ? String(flexMaxNights) : "",
+        },
       },
-    });
+      {
+        idempotencyKey: `booking-create-${bookingRow.id}`,
+      }
+    );
   } catch (stripeError: any) {
     console.error("[api/bookings/create] stripe checkout session failed", {
       message: stripeError?.message ?? "unknown stripe error",

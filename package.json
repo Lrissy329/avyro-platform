@@ -9,7 +9,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit --incremental false",
     "lint": "next lint",
-    "smoke:rolling-flex": "node scripts/smoke-rolling-flex.mjs"
+    "smoke:rolling-flex": "node scripts/smoke-rolling-flex.mjs",
+    "backfill:host-stripe-readiness": "node scripts/backfill-host-stripe-readiness.mjs"
   },
   "dependencies": {
     "@daypilot/daypilot-lite-react": "^5.4.1",

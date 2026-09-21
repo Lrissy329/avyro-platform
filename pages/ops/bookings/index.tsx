@@ -13,6 +13,7 @@ import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import type { OpsRole } from "@/lib/opsRbac";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { formatOpsShortDate } from "@/lib/opsDateFormat";
 
 type BookingRow = {
   id: string;
@@ -60,16 +61,7 @@ type PageProps = {
   errors: string[];
 };
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    day: "2-digit",
-    month: "short",
-  }).format(date);
-};
+const formatDate = (value?: string | null) => formatOpsShortDate(value);
 
 const formatCurrency = (value?: number | null, currency = "GBP") => {
   if (value == null || !Number.isFinite(value)) return "—";

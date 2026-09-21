@@ -91,7 +91,7 @@ export default function HostListingsPage() {
           const [{ data: profileRow }] = await Promise.all([
             supabase
               .from("profiles")
-              .select("stripe_account_id, stripe_onboarding_status")
+              .select("stripe_account_id, charges_enabled, payouts_enabled")
               .eq("id", userId)
               .maybeSingle(),
           ]);
@@ -100,8 +100,8 @@ export default function HostListingsPage() {
 
           setStripeConnected(
             Boolean((profileRow as any)?.stripe_account_id) &&
-              String((profileRow as any)?.stripe_onboarding_status ?? "").toLowerCase() ===
-                "complete"
+              (profileRow as any)?.charges_enabled === true &&
+              (profileRow as any)?.payouts_enabled === true
           );
         }
       } catch (error: any) {
@@ -200,9 +200,15 @@ export default function HostListingsPage() {
                         </Badge>
                         {readiness.status === "search_ready" ? (
                           <span className="text-xs text-emerald-700">✓ Search Ready</span>
+                        ) : readiness.reasons.length > 0 ? (
+                          <ul className="space-y-0.5 text-xs text-amber-700">
+                            {readiness.reasons.map((reason) => (
+                              <li key={reason}>⚠ {reason}</li>
+                            ))}
+                          </ul>
                         ) : (
                           <span className="text-xs text-amber-700">
-                            ⚠ {readiness.reasons[0] ?? "Needs action before this listing can receive bookings."}
+                            ⚠ Needs action before this listing can receive bookings.
                           </span>
                         )}
                       </div>

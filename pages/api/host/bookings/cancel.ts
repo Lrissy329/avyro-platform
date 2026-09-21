@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
 
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { canSelfCancelBooking } from "@/lib/bookingStatus";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const authClient = createPagesServerClient({ req, res });
@@ -27,7 +28,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const supabase = getSupabaseServerClient();
   const { data: bookingRow, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, host_id, status")
+    .select("id, host_id, status, stripe_status")
     .eq("id", bookingId)
     .maybeSingle();
 
@@ -39,6 +40,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
   if (bookingRow.host_id !== session.user.id) {
     return res.status(403).json({ error: "forbidden" });
+  }
+  if (!canSelfCancelBooking(bookingRow.status, bookingRow.stripe_status)) {
+    return res.status(409).json({
+      error: "This booking is paid — contact support to cancel.",
+      code: "BOOKING_REQUIRES_SUPPORT_CANCELLATION",
+    });
   }
 
   const { data, error } = await supabase

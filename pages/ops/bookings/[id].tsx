@@ -8,6 +8,8 @@ import OpsStatusBadge from "@/components/ops/OpsStatusBadge";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import { hasOpsPermission, type OpsRole } from "@/lib/opsRbac";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { isPaidFinalBookingStatus, canSelfCancelBooking } from "@/lib/bookingStatus";
+import { formatOpsDateTime } from "@/lib/opsDateFormat";
 
 type BookingDetail = {
   id: string;
@@ -65,22 +67,7 @@ type PageProps = {
   errors: string[];
 };
 
-const BOOKING_DETAIL_DATE_TIME = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/London",
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-const formatDateTime = (value?: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return BOOKING_DETAIL_DATE_TIME.format(date);
-};
+const formatDateTime = (value?: string | null) => formatOpsDateTime(value);
 
 const formatCurrencyPence = (value?: number | null, currency = "GBP") => {
   if (value == null || !Number.isFinite(value)) return "—";
@@ -204,6 +191,7 @@ export default function OpsBookingDetail({
   const canEditBooking = hasOpsPermission(role, "ops:bookings:write");
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [refunding, setRefunding] = useState(false);
 
   const queryTab = typeof router.query.tab === "string" ? router.query.tab : null;
   const activeTab = useMemo(
@@ -225,6 +213,30 @@ export default function OpsBookingDetail({
       window.location.reload();
     } catch (err: any) {
       setActionStatus(err?.message ?? "Action failed");
+    }
+  };
+
+  const canRefund =
+    canEditBooking && Boolean(booking.stripe_payment_intent_id) && isPaidFinalBookingStatus(booking.status);
+
+  const handleRefund = async () => {
+    if (!canRefund || refunding) return;
+    const confirmed = window.confirm(
+      "Issue a full refund for this booking? This will refund the guest, reverse the host's transfer, and cancel the booking. This cannot be undone."
+    );
+    if (!confirmed) return;
+
+    setRefunding(true);
+    setActionStatus("Processing refund...");
+    try {
+      const resp = await fetch(`/api/ops/bookings/${booking.id}/refund`, { method: "POST" });
+      const payload = await resp.json();
+      if (!resp.ok) throw new Error(payload?.error ?? "Refund failed");
+      setActionStatus(`Refund issued (${payload?.refundId ?? "—"}).`);
+      window.location.reload();
+    } catch (err: any) {
+      setActionStatus(err?.message ?? "Refund failed");
+      setRefunding(false);
     }
   };
 
@@ -481,13 +493,26 @@ export default function OpsBookingDetail({
                     >
                       Clear review flag
                     </button>
-                    <button
-                      onClick={() => runAction(`/api/ops/bookings/${booking.id}/cancel`)}
-                      className="w-full rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-100"
-                    >
-                      Cancel booking
-                    </button>
                   </>
+                )}
+                {canEditBooking && canSelfCancelBooking(booking.status, booking.stripe_status) && (
+                  <button
+                    onClick={() => {
+                      const confirmed = window.confirm(
+                        "Cancel this booking? This cannot be undone."
+                      );
+                      if (!confirmed) return;
+                      runAction(`/api/ops/bookings/${booking.id}/cancel`);
+                    }}
+                    className="w-full rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-100"
+                  >
+                    Cancel booking
+                  </button>
+                )}
+                {canEditBooking && !canSelfCancelBooking(booking.status, booking.stripe_status) && (
+                  <p className="text-xs text-[var(--ops-muted)]">
+                    This booking has a completed payment — use Full Refund below.
+                  </p>
                 )}
                 {!canEditBooking && (
                   <p className="text-xs text-[var(--ops-muted)]">No actions available.</p>
@@ -503,14 +528,30 @@ export default function OpsBookingDetail({
               </p>
             </div>
 
-            <div className="rounded-3xl border border-amber-300/60 bg-amber-50 p-5 text-sm text-amber-900">
-              <p className="text-xs uppercase tracking-[0.3em] text-amber-700">Manual refund reminder</p>
-              <p className="mt-3 font-semibold">Refunds are still a Stripe-first manual process.</p>
-              <ul className="mt-3 space-y-2 text-amber-800">
-                <li>Use the Payment Intent ID to find the payment in Stripe.</li>
-                <li>Issue the refund in Stripe before changing internal booking notes.</li>
-                <li>Record refund amount, refund ID, and reason in internal notes or a linked case.</li>
-              </ul>
+            <div className="rounded-3xl border border-rose-300/60 bg-rose-50 p-5 text-sm text-rose-900">
+              <p className="text-xs uppercase tracking-[0.3em] text-rose-700">Refund</p>
+              {canRefund ? (
+                <>
+                  <p className="mt-3 font-semibold">Issue a full refund for this booking.</p>
+                  <p className="mt-2 text-rose-800">
+                    Refunds the guest in full, reverses the host&apos;s transfer, and returns the
+                    platform fee, then cancels the booking.
+                  </p>
+                  <button
+                    onClick={handleRefund}
+                    disabled={refunding}
+                    className="mt-4 w-full rounded-xl border border-rose-500/40 bg-rose-600 px-4 py-2 text-sm font-semibold !text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {refunding ? "Processing refund..." : "Full Refund"}
+                  </button>
+                </>
+              ) : (
+                <p className="mt-3 text-rose-800">
+                  {booking.stripe_payment_intent_id
+                    ? "This booking is not in a refundable state."
+                    : "This booking has no Stripe payment to refund."}
+                </p>
+              )}
             </div>
           </div>
         </div>

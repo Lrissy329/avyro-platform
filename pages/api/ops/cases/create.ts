@@ -1,6 +1,16 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { requireOpsStaffApi } from "@/lib/opsAuth";
 
+const isMissingRelation = (error: any, relation: string) => {
+  const code = String(error?.code ?? "").toLowerCase();
+  const message = String(error?.message ?? "").toLowerCase();
+  return (
+    code === "42p01" &&
+    message.includes("relation") &&
+    message.includes(relation.toLowerCase())
+  );
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -42,6 +52,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     .single();
 
   if (caseError || !caseRow?.id) {
+    if (isMissingRelation(caseError, "public.cases")) {
+      return res.status(503).json({
+        error: "Cases are not configured in this environment yet.",
+      });
+    }
     return res.status(400).json({ error: caseError?.message ?? "Failed to create case" });
   }
 

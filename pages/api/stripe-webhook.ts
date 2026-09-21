@@ -3,6 +3,7 @@ import { stripe } from "@/lib/stripe";
 import { createClient } from "@supabase/supabase-js";
 import { finalizeSharedGroupCheckout, isSharedGroupCheckoutSession } from "@/lib/sharedCheckout";
 import { sendBookingEmails } from "@/lib/email/sendBookingEmails";
+import { canExpireUnpaidCheckout } from "@/lib/bookingStatus";
 
 export const config = {
   api: {
@@ -152,6 +153,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).send(`Webhook Error: ${err?.message ?? "Invalid signature"}`);
   }
 
+  // Idempotency: track per-event processing state so a mid-flight handler
+  // failure doesn't permanently mark an event as done (see
+  // db/migrations/20260814_processed_stripe_events.sql). Lock acquisition
+  // is a single atomic INSERT ... ON CONFLICT (event_id) DO NOTHING via
+  // upsert(ignoreDuplicates: true) -- not a SELECT followed by an INSERT --
+  // so two concurrent deliveries of the same event can never both win the
+  // lock: Postgres's own unique-constraint enforcement decides the winner,
+  // and `.select("event_id")` after an ignore-duplicates upsert returns a
+  // row only for whichever request actually inserted it.
+  const { data: lockRows, error: lockError } = await supabaseAdmin
+    .from("processed_stripe_events")
+    .upsert({ event_id: event.id, status: "processing" }, { onConflict: "event_id", ignoreDuplicates: true })
+    .select("event_id");
+
+  if (lockError) {
+    console.error("[stripe-webhook] failed to acquire event idempotency lock:", lockError);
+    return res.status(500).send("Webhook idempotency check failed");
+  }
+
+  if (!lockRows || lockRows.length === 0) {
+    // Someone already holds or has finished this event_id. This read never
+    // gates a mutation -- it only decides how to respond -- so it doesn't
+    // reopen the race the atomic insert above already resolved.
+    const { data: existing, error: statusError } = await supabaseAdmin
+      .from("processed_stripe_events")
+      .select("status")
+      .eq("event_id", event.id)
+      .maybeSingle();
+
+    if (statusError) {
+      console.error("[stripe-webhook] failed to read event idempotency status:", statusError);
+      return res.status(500).send("Webhook idempotency check failed");
+    }
+
+    if (existing?.status === "processed") {
+      // Already fully handled by an earlier delivery -- acknowledge
+      // without reprocessing.
+      return res.status(200).json({ received: true, duplicate: true });
+    }
+
+    // Either status === "processing" (a concurrent delivery is still
+    // in-flight elsewhere) or the row was deleted between the failed
+    // insert above and this read (an earlier attempt just failed and reset
+    // itself). Do not run the handler here either way. A non-2xx makes
+    // Stripe retry later: by then the in-flight attempt will have resolved
+    // to "processed" (next retry returns 200 duplicate) or reset itself on
+    // failure (next retry is free to reacquire the lock and process it).
+    return res.status(409).send("Event is already being processed");
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -204,8 +255,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
 
+        // "paid" (not "confirmed") is the canonical successful-Checkout
+        // status for this schema -- the live bookings_status_check /
+        // bookings_status_chk constraints do not include "confirmed" in
+        // their allowed set, so any update attempting status:"confirmed"
+        // is guaranteed to fail. isPaidFinalBookingStatus() (lib/
+        // bookingStatus.ts) and confirm-session.ts's
+        // isFinalizedBookingState() both already treat "paid" as fully
+        // final, so no other file needs to change for this.
+        //
+        // Both payload tiers below always carry the Stripe identifiers --
+        // there is no longer a further-degraded tier that can finalize a
+        // paid booking while dropping stripe_checkout_session_id/
+        // stripe_payment_intent_id.
         const fullPayload: Record<string, any> = {
-          status: "confirmed",
+          status: "paid",
           payout_status: "awaiting_payout",
           stripe_checkout_session_id: session.id,
           stripe_payment_intent_id: paymentIntentId,
@@ -215,8 +279,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         };
 
         const fallbackPayload: Record<string, any> = {
-          status: "confirmed",
+          status: "paid",
           payout_status: "awaiting_payout",
+          stripe_checkout_session_id: session.id,
+          stripe_payment_intent_id: paymentIntentId,
           stripe_status: "succeeded",
         };
 
@@ -264,15 +330,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         if (updateResult?.error) {
-          console.error("[stripe-webhook] failed to update booking:", updateResult.error);
-          const paidFallback = {
-            ...fallbackPayload,
-            status: "paid",
-          };
-          await supabaseAdmin
-            .from("bookings")
-            .update(paidFallback)
-            .eq("stripe_checkout_session_id", session.id);
+          // fallbackPayload already uses the correct status ("paid") and
+          // already carries the Stripe identifiers -- if even this
+          // minimal, schema-drift-tolerant payload fails, that's a
+          // genuine unexpected error, not the now-fixed status-constraint
+          // issue, so there is no further degraded payload to fall back
+          // to. Log loudly rather than inventing another attempt.
+          console.error("[stripe-webhook] failed to update booking even with minimal payload:", updateResult.error);
         } else if (updateResult && (!updateResult.data || updateResult.data.length === 0)) {
           console.warn("[stripe-webhook] booking update matched no rows. Ensure booking exists.");
         } else {
@@ -287,6 +351,79 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               });
             } catch (emailError) {
               console.warn("[stripe-webhook] booking email send failed:", emailError);
+            }
+          }
+        }
+
+        break;
+      }
+
+      case "checkout.session.expired": {
+        // Inventory-reservation hold is capped at 30 minutes (both
+        // Checkout Sessions now set expires_at accordingly). If the
+        // guest never completed payment, release the provisional
+        // booking (and, for shared stays, the pending member row) so
+        // the dates/spot become bookable again. canExpireUnpaidCheckout
+        // positively requires the row to still be an unpaid provisional
+        // status AND stripe_status to not indicate a completed payment
+        // -- it is not simply "not yet paid", so this can never touch a
+        // paid/confirmed/completed/already-cancelled booking. The
+        // .in("status", [...]) filter on the update itself is a second,
+        // DB-level guard against a race with checkout.session.completed
+        // finalizing the same booking between this read and this write.
+        const session = event.data.object as any;
+        const metadata = session?.metadata ?? {};
+        const bookingId = metadata.booking_id ?? metadata.bookingId ?? null;
+
+        if (bookingId) {
+          const { data: bookingRow, error: bookingFetchError } = await supabaseAdmin
+            .from("bookings")
+            .select("id, status, stripe_status")
+            .eq("id", bookingId)
+            .maybeSingle();
+
+          if (bookingFetchError) {
+            console.error(
+              "[stripe-webhook] failed to fetch booking for checkout.session.expired:",
+              bookingFetchError
+            );
+          } else if (bookingRow && canExpireUnpaidCheckout(bookingRow.status, bookingRow.stripe_status)) {
+            const { error: expireError } = await supabaseAdmin
+              .from("bookings")
+              .update({ status: "cancelled", stripe_status: "cancelled" })
+              .eq("id", bookingId)
+              .in("status", ["awaiting_payment", "pending_payment"]);
+
+            if (expireError) {
+              console.error("[stripe-webhook] failed to release expired checkout booking:", expireError);
+            }
+          }
+        }
+
+        // Shared-stay hygiene only -- capacity correctness does not
+        // depend on this. Every occupancy computation (search.tsx, the
+        // host calendar feed, and the enforce_shared_group_capacity /
+        // refresh_shared_group_occupancy triggers) already treats a
+        // pending shared_group_members row as inactive the moment its
+        // own reservation_expires_at passes, independent of this
+        // status flip. This just keeps the row from showing as a stale
+        // "pending" hold in ops/host views. The .eq("status","pending")
+        // filter ensures an already-confirmed member row is never
+        // touched, even under a race with finalization.
+        if (isSharedGroupCheckoutSession(session)) {
+          const sharedGroupMemberId = metadata.shared_group_member_id ?? null;
+          if (sharedGroupMemberId) {
+            const { error: memberExpireError } = await supabaseAdmin
+              .from("shared_group_members")
+              .update({ status: "cancelled", updated_at: new Date().toISOString() })
+              .eq("id", sharedGroupMemberId)
+              .eq("status", "pending");
+
+            if (memberExpireError) {
+              console.error(
+                "[stripe-webhook] failed to release expired shared group member hold:",
+                memberExpireError
+              );
             }
           }
         }
@@ -330,15 +467,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const accountId = account?.id as string | undefined;
         if (!accountId) break;
 
-        if (account?.details_submitted) {
-          const { error } = await supabaseAdmin
-            .from("profiles")
-            .update({ stripe_onboarding_status: "complete" })
-            .eq("stripe_account_id", accountId);
+        const { error } = await supabaseAdmin
+          .from("profiles")
+          .update({
+            stripe_onboarding_status: account?.details_submitted ? "complete" : "incomplete",
+            charges_enabled: account?.charges_enabled === true,
+            payouts_enabled: account?.payouts_enabled === true,
+          })
+          .eq("stripe_account_id", accountId);
 
-          if (error) {
-            console.error("[stripe-webhook] failed to update host profile:", error);
-          }
+        if (error) {
+          console.error("[stripe-webhook] failed to update host profile:", error);
         }
 
         break;
@@ -388,9 +527,94 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         break;
     }
 
+    // The handler above already completed successfully -- its side effects
+    // (booking writes, emails, etc.) happened exactly once. Finalizing the
+    // idempotency record is a small, bounded, retried step in its own
+    // right, distinct from the handler itself: a transient DB blip here
+    // must not be confused with a handler failure.
+    const MARK_PROCESSED_MAX_ATTEMPTS = 3;
+    const MARK_PROCESSED_RETRY_DELAY_MS = 250;
+
+    let markedProcessed = false;
+    let markProcessedError: any = null;
+
+    for (let attempt = 1; attempt <= MARK_PROCESSED_MAX_ATTEMPTS; attempt++) {
+      // Supabase/PostgREST does not return matched rows from an UPDATE
+      // unless explicitly asked -- without .select(), an UPDATE that
+      // matches zero rows (e.g. the "processing" filter no longer matches
+      // for some unexpected reason) still comes back with error === null,
+      // which would be indistinguishable from a real success. Require
+      // exactly one returned row, for this event_id, to count as success.
+      const { data: updatedRows, error } = await supabaseAdmin
+        .from("processed_stripe_events")
+        .update({ status: "processed", processed_at: new Date().toISOString() })
+        .eq("event_id", event.id)
+        .eq("status", "processing")
+        .select("event_id");
+
+      if (!error && updatedRows?.length === 1 && updatedRows[0]?.event_id === event.id) {
+        markedProcessed = true;
+        break;
+      }
+
+      if (error) {
+        markProcessedError = error;
+        console.error(
+          `[stripe-webhook] mark-processed attempt ${attempt}/${MARK_PROCESSED_MAX_ATTEMPTS} failed:`,
+          error
+        );
+      } else if (!updatedRows || updatedRows.length === 0) {
+        markProcessedError = new Error("mark-processed update matched no processing row");
+        console.error(
+          `[stripe-webhook] mark-processed attempt ${attempt}/${MARK_PROCESSED_MAX_ATTEMPTS} matched no processing row for event_id=${event.id}`
+        );
+      } else {
+        markProcessedError = new Error("mark-processed update matched more than one row");
+        console.error(
+          `[stripe-webhook] mark-processed attempt ${attempt}/${MARK_PROCESSED_MAX_ATTEMPTS} matched ${updatedRows.length} rows for event_id=${event.id}, expected exactly 1`
+        );
+      }
+
+      if (attempt < MARK_PROCESSED_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, MARK_PROCESSED_RETRY_DELAY_MS));
+      }
+    }
+
+    if (!markedProcessed) {
+      // All bounded attempts failed. Do not delete the "processing" row
+      // here -- the handler already ran, so freeing the lock would let a
+      // future delivery reacquire it and re-run the handler, duplicating
+      // those side effects. Returning 5xx surfaces this as a failed
+      // webhook for visibility; a later Stripe retry of this same event
+      // will hit the existing-lock branch above (status still
+      // "processing") and correctly return 409 without reprocessing, so
+      // this state needs manual cleanup rather than resolving itself --
+      // that's expected here, not a regression.
+      console.error(
+        "[stripe-webhook] handler side effects completed but idempotency record could not be finalized after",
+        MARK_PROCESSED_MAX_ATTEMPTS,
+        "attempts:",
+        markProcessedError
+      );
+      return res.status(500).send("Webhook handler succeeded but idempotency finalization failed");
+    }
+
     return res.status(200).json({ received: true });
   } catch (err: any) {
     console.error("[stripe-webhook] handler error:", err);
+
+    const { error: resetError } = await supabaseAdmin
+      .from("processed_stripe_events")
+      .delete()
+      .eq("event_id", event.id);
+
+    if (resetError) {
+      console.error(
+        "[stripe-webhook] failed to reset idempotency record after handler error:",
+        resetError
+      );
+    }
+
     return res.status(500).send("Webhook handler error");
   }
 }

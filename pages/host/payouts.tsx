@@ -47,9 +47,10 @@ export default function HostPayoutsPage() {
   const [error, setError] = useState<string | null>(null);
   const [stripeStatus, setStripeStatus] = useState<{
     accountId: string | null;
-    onboardingStatus: string | null;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
     email: string | null;
-  }>({ accountId: null, onboardingStatus: null, email: null });
+  }>({ accountId: null, chargesEnabled: false, payoutsEnabled: false, email: null });
   const [connecting, setConnecting] = useState(false);
 
   const loadPayouts = useCallback(async () => {
@@ -69,13 +70,14 @@ export default function HostPayoutsPage() {
 
     const { data: profileRow } = await supabase
       .from("profiles")
-      .select("stripe_account_id, stripe_onboarding_status")
+      .select("stripe_account_id, charges_enabled, payouts_enabled")
       .eq("id", user.id)
       .maybeSingle();
 
     setStripeStatus({
       accountId: (profileRow as any)?.stripe_account_id ?? null,
-      onboardingStatus: (profileRow as any)?.stripe_onboarding_status ?? null,
+      chargesEnabled: (profileRow as any)?.charges_enabled === true,
+      payoutsEnabled: (profileRow as any)?.payouts_enabled === true,
       email: user.email ?? null,
     });
 
@@ -146,7 +148,8 @@ export default function HostPayoutsPage() {
     }
   }, [stripeStatus.accountId, stripeStatus.email]);
 
-  const isStripeConnected = stripeStatus.onboardingStatus === "complete";
+  const isStripeConnected =
+    Boolean(stripeStatus.accountId) && stripeStatus.chargesEnabled && stripeStatus.payoutsEnabled;
   const stripeLabel = isStripeConnected
     ? "Connected"
     : stripeStatus.accountId

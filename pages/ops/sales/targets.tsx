@@ -3,6 +3,7 @@ import Link from "next/link";
 import OpsLayout from "@/components/ops/OpsLayout";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { formatOpsShortDate } from "@/lib/opsDateFormat";
 import type { OpsRole } from "@/lib/opsRbac";
 
 type TargetRow = {
@@ -50,12 +51,7 @@ type PageProps = {
   attainmentPct: number;
 };
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-};
+const formatDate = (value?: string | null) => formatOpsShortDate(value);
 
 const STATUS_STYLES: Record<string, string> = {
   lead_new: "bg-amber-500/20 text-amber-200 border-amber-500/40",

@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
 import { getSharedStayWeeks, normalizeSharedJoinMode, parseIsoDateOnly } from "@/lib/sharedStay";
 import {
+  checkListingSharedCapacityForRange,
   isMissingSharedSchema,
   listOverlappingSharedGroupsWithOccupancy,
 } from "@/lib/sharedGroupsDb";
@@ -126,6 +127,11 @@ export default async function handler(
   }
 
   if (!hasRange) {
+    // No late joining for MVP: guest-facing "Active shared stays" excludes
+    // groups whose stay has already started, not just already ended.
+    // Historical rows are untouched -- this only affects which groups are
+    // returned to the guest-facing discovery list.
+    const todayIso = new Date().toISOString().slice(0, 10);
     let activeGroups = [];
     try {
       activeGroups = await listOverlappingSharedGroupsWithOccupancy(supabase, {
@@ -140,7 +146,13 @@ export default async function handler(
     }
 
     const groups: SharedGroupOption[] = activeGroups
-      .filter((group) => group.status === "open" && group.active > 0)
+      .filter(
+        (group) =>
+          group.status === "open" &&
+          group.active > 0 &&
+          group.startDate >= todayIso &&
+          group.endDate > todayIso
+      )
       .map((group) => {
         const spotsRemaining = Math.max(0, group.totalSpots - group.active);
         const normalizedStatus: SharedGroupOption["status"] = spotsRemaining > 0 ? "open" : "full";
@@ -231,11 +243,16 @@ export default async function handler(
   const exactGroups = overlappingGroups.filter(
     (group) => group.startDate === checkIn && group.endDate === checkOut && group.status !== "closed"
   );
-  const conflictingOccupiedGroup = overlappingGroups.find(
-    (group) =>
-      group.confirmed > 0 &&
-      !(group.startDate === checkIn && group.endDate === checkOut)
-  );
+
+  // Advisory only (mirrors the aggregate capacity check checkout.ts
+  // actually gates on) -- drives the "reason" text below, not a hard
+  // rejection here.
+  const capacityCheck = await checkListingSharedCapacityForRange(supabase, {
+    listingId,
+    startDate: checkIn,
+    endDate: checkOut,
+    listingTotalSpots: totalSpots,
+  });
 
   const groups: SharedGroupOption[] = exactGroups.map((group) => {
     const spotsRemaining = Math.max(0, group.totalSpots - group.active);
@@ -282,7 +299,7 @@ export default async function handler(
     groups,
     suggestedJoinGroupId: suggestedJoinGroup?.id ?? null,
     reason:
-      conflictingOccupiedGroup && groups.length === 0
+      !capacityCheck.ok && groups.length === 0
         ? "These dates are already reserved for another shared stay."
         : undefined,
   });

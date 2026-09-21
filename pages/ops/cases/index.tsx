@@ -9,6 +9,7 @@ import OpsStatusBadge from "@/components/ops/OpsStatusBadge";
 import OpsTable from "@/components/ops/OpsTable";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { formatOpsShortDate } from "@/lib/opsDateFormat";
 import type { OpsRole } from "@/lib/opsRbac";
 
 type CaseRow = {
@@ -45,16 +46,7 @@ type PageProps = {
   casesAvailable: boolean;
 };
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    day: "2-digit",
-    month: "short",
-  }).format(date);
-};
+const formatDate = (value?: string | null) => formatOpsShortDate(value);
 
 const isUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);

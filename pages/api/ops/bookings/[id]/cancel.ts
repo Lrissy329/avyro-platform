@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { requireOpsStaffApi } from "@/lib/opsAuth";
+import { canSelfCancelBooking } from "@/lib/bookingStatus";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -13,6 +14,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const bookingId = req.query.id as string;
   if (!bookingId) {
     return res.status(400).json({ error: "Missing booking id" });
+  }
+
+  const { data: bookingRow, error: fetchError } = await admin
+    .from("bookings")
+    .select("status, stripe_status")
+    .eq("id", bookingId)
+    .maybeSingle();
+
+  if (fetchError) {
+    return res.status(500).json({ error: fetchError.message });
+  }
+  if (!bookingRow) {
+    return res.status(404).json({ error: "Booking not found." });
+  }
+  if (!canSelfCancelBooking(bookingRow.status, bookingRow.stripe_status)) {
+    return res.status(409).json({
+      error: "This booking has a completed payment. Use Full Refund instead of Cancel.",
+      code: "USE_REFUND_INSTEAD",
+    });
   }
 
   const { error: updateError } = await admin

@@ -24,7 +24,7 @@ export function SharedOccupancyPill({
     <span
       className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${styles}`}
     >
-      {safeFilled} of {safeTotal} spots filled
+      {state === "full" ? "Full" : `${remaining} space${remaining === 1 ? "" : "s"} available`}
     </span>
   );
 }

@@ -11,6 +11,7 @@ import { ReservationContextMenu } from "@/modules/calendar/components/Reservatio
 import { ReservationDrawer } from "@/modules/calendar/components/ReservationDrawer";
 import type { HostCalendarView, ReservationRecord, CalendarFeed } from "@/modules/calendar/types";
 import { useCalendarFeed } from "@/modules/calendar/hooks/useCalendarFeed";
+import { SUPPORT_EMAIL } from "@/lib/support";
 import {
   getMonthRange,
   getSchedulerRange,
@@ -182,7 +183,12 @@ export function HostCalendarPage() {
       });
 
       if (!response.ok) {
-        alert("Unable to cancel booking.");
+        const payload = await response.json().catch(() => null);
+        alert(
+          payload?.code === "BOOKING_REQUIRES_SUPPORT_CANCELLATION"
+            ? `This booking is paid. Contact ${SUPPORT_EMAIL} to cancel.`
+            : payload?.error ?? "Unable to cancel booking."
+        );
         return;
       }
 

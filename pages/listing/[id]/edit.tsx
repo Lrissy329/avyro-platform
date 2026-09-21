@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
@@ -108,6 +108,8 @@ export default function EditListingPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // The airport the listing had when it was loaded, to tell whether a save changed it.
+  const loadedAirportCodeRef = useRef<string>("");
   const [form, setForm] = useState<ListingForm | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -155,6 +157,8 @@ export default function EditListingPage() {
 
       const rawType = (data.type as string | null) ?? "entire place";
       const normalizedType = rawType === "shared room" ? "private room" : rawType;
+
+      loadedAirportCodeRef.current = String(data.airport_code ?? "").trim().toUpperCase();
 
       const initial: ListingForm = {
         title: data.title ?? "",
@@ -487,6 +491,17 @@ export default function EditListingPage() {
     if (error) {
       setFormError(error.message);
       return;
+    }
+
+    // Travel times are measured to the listing's airport, so a changed airport needs new ones. Fire and
+    // forget: the endpoint checks the host owns the listing and enforces its own cooldown.
+    const savedAirportCode = String(form.airport_code ?? "").trim().toUpperCase();
+    if (savedAirportCode && savedAirportCode !== loadedAirportCodeRef.current) {
+      fetch("/api/transport/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: id, force: true }),
+      }).catch((err) => console.error("[listing edit] transport refresh failed", err));
     }
 
     setPhotoFiles([]);

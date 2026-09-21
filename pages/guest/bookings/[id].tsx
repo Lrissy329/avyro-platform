@@ -24,6 +24,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
 import { useGuestBookingsData } from "@/hooks/useGuestBookingsData";
 import { supabase } from "@/lib/supabaseClient";
+import { isPaidFinalBookingStatus, isStripePaidStatus } from "@/lib/bookingStatus";
+import { SUPPORT_EMAIL } from "@/lib/support";
 
 const formatMoney = (amountMajor: number, currency = "GBP") =>
   new Intl.NumberFormat("en-GB", {
@@ -386,10 +388,6 @@ export default function GuestBookingDetailPage() {
                       <span>Date paid</span>
                       <span className="font-semibold text-slate-900">{formatDate(booking.created_at)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span>Receipt</span>
-                      <span className="text-xs text-slate-500">Coming soon</span>
-                    </div>
                   </div>
                 </Card>
 
@@ -447,6 +445,14 @@ export default function GuestBookingDetailPage() {
                       >
                         {canceling ? "Cancelling…" : "Cancel booking"}
                       </button>
+                    ) : isPaidFinalBookingStatus(status) || isStripePaidStatus(stripeStatus) ? (
+                      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                        This booking is paid. To cancel, contact{" "}
+                        <a href={`mailto:${SUPPORT_EMAIL}`} className="font-semibold underline">
+                          {SUPPORT_EMAIL}
+                        </a>
+                        .
+                      </p>
                     ) : null}
 
                     {reviewLoading ? (

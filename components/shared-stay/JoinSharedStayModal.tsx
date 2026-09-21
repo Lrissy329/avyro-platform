@@ -46,7 +46,7 @@ export function JoinSharedStayModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Join this crew stay</DialogTitle>
           <DialogDescription>
@@ -57,7 +57,8 @@ export function JoinSharedStayModal({
         <div className="space-y-3">
           {selectedGroup ? (
             <p className="text-sm text-slate-700">
-              {selectedGroup.filledSpots} of {selectedGroup.totalSpots} spots filled
+              {Math.max(0, selectedGroup.totalSpots - selectedGroup.filledSpots)} space
+              {Math.max(0, selectedGroup.totalSpots - selectedGroup.filledSpots) === 1 ? "" : "s"} available
             </p>
           ) : null}
 
@@ -80,7 +81,7 @@ export function JoinSharedStayModal({
               </p>
               <p className="mt-1">
                 {hasAnyGroups
-                  ? "Check other dates or start a new group."
+                  ? "Check other dates or start a new shared stay."
                   : "Be the first to start this stay. Others can join automatically."}
               </p>
               {onStartGroup ? (

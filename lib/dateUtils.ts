@@ -12,7 +12,7 @@ export const formatLocalDate = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const getTimeZoneParts = (date: Date, timeZone: string) => {
+export const getTimeZoneParts = (date: Date, timeZone: string) => {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",

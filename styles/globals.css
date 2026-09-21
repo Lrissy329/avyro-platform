@@ -849,9 +849,19 @@ html, body, #__next { height: 100%; }
   margin: 0 12px;
 }
 
+/* Inline availability calendar (listing page). Fluid, so it fills its card evenly whatever the column
+   width: each month takes an equal share (capped so cells never get huge), the day cells share a
+   month's width equally and stay square, and the whole thing is centred. It used to be flex-start with
+   fixed 34px cells, which hugged the left edge and left dead space on the right. */
 .availability-datepicker--inline {
-  justify-content: flex-start;
-  gap: 12px;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  width: 100%;
+  /* .booking-datepicker (shared with the booking pop-up) forces min-width: 700px on desktop, which is
+     wider than this column and made the calendar overflow and stretch the page layout. */
+  min-width: 0;
+  gap: 28px;
 }
 
 .availability-datepicker--inline .react-datepicker__header {
@@ -859,26 +869,37 @@ html, body, #__next { height: 100%; }
 }
 
 .availability-datepicker--inline .react-datepicker__month-container {
+  float: none;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 320px;
   margin: 0;
   padding: 0 2px 2px;
 }
 
+.availability-datepicker--inline .react-datepicker__day-names,
+.availability-datepicker--inline .react-datepicker__week {
+  display: flex;
+}
+
 .availability-datepicker--inline .react-datepicker__day-name {
-  width: 34px;
+  flex: 1 1 0;
+  width: auto;
+  margin: 0;
   line-height: 20px;
   font-size: 0.68rem;
 }
 
 .availability-datepicker--inline .react-datepicker__day {
-  width: 34px;
-  line-height: 32px;
-  font-size: 0.82rem;
-}
-
-@media (min-width: 1280px) {
-  .availability-datepicker--inline {
-    flex-wrap: nowrap;
-  }
+  flex: 1 1 0;
+  width: auto;
+  margin: 0;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 0.85rem;
 }
 
 .availability-datepicker .avyro-day-booked {

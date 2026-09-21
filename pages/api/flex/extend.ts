@@ -5,6 +5,8 @@ import { stripe } from "@/lib/stripe";
 import { ensureRangeAvailable } from "@/lib/flexAvailability";
 import { calculateFlexCharge, type FlexPricingPolicy } from "@/lib/flexPricing";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { getHostStripeReadiness } from "@/lib/hostStripeReadiness";
+import { PLATFORM_FEE_CAP_PENCE } from "@/lib/pricing";
 import {
   addDaysUtc,
   computeRollingFlexCutoff,
@@ -33,9 +35,9 @@ type ExtendResponse =
   | { error: string; code?: string };
 
 const bookingSelects = [
-  "id, guest_id, host_id, listing_id, status, currency, nights, price_total, guest_total_pence, guest_unit_price_pence, amount_paid_pence, confirmed_total_pence, latest_repriced_total_pence, discount_tier_applied, stripe_payment_intent_id, flex_mode, flex_status, flex_max_end, flex_rolling_window_days, flex_pricing_multiplier, flex_pricing_policy, flex_current_confirmed_end",
-  "id, guest_id, host_id, listing_id, status, currency, nights, price_total, guest_total_pence, guest_unit_price_pence, amount_paid_pence, confirmed_total_pence, latest_repriced_total_pence, stripe_payment_intent_id, flex_mode, flex_status, flex_max_end, flex_rolling_window_days, flex_current_confirmed_end",
-  "id, guest_id, host_id, listing_id, status, currency, nights, price_total, guest_total_pence, guest_unit_price_pence, stripe_payment_intent_id, flex_mode, flex_status",
+  "id, guest_id, host_id, listing_id, status, currency, nights, price_total, guest_total_pence, guest_unit_price_pence, amount_paid_pence, confirmed_total_pence, latest_repriced_total_pence, discount_tier_applied, platform_fee_bps, stripe_payment_intent_id, flex_mode, flex_status, flex_max_end, flex_rolling_window_days, flex_pricing_multiplier, flex_pricing_policy, flex_current_confirmed_end",
+  "id, guest_id, host_id, listing_id, status, currency, nights, price_total, guest_total_pence, guest_unit_price_pence, amount_paid_pence, confirmed_total_pence, latest_repriced_total_pence, platform_fee_bps, stripe_payment_intent_id, flex_mode, flex_status, flex_max_end, flex_rolling_window_days, flex_current_confirmed_end",
+  "id, guest_id, host_id, listing_id, status, currency, nights, price_total, guest_total_pence, guest_unit_price_pence, platform_fee_bps, stripe_payment_intent_id, flex_mode, flex_status",
 ] as const;
 
 const insertSystemMessage = async ({
@@ -294,6 +296,62 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
   let extensionPaymentIntent: any = null;
   if (extensionAmountPence > 0) {
+    // Host Stripe Connect readiness gate -- must run before any Stripe
+    // call (including the prior-PaymentIntent lookup below, which exists
+    // solely to prepare this charge). Scoped inside this
+    // extensionAmountPence > 0 block deliberately: when the extension is
+    // fully covered without a new charge, no Stripe call happens at all,
+    // so there is nothing to gate. No DB state mutation for this
+    // extension happens anywhere above this point either -- the booking
+    // row and booking_flex_windows updates further below only run after
+    // this block completes (or is skipped), so there is no phantom
+    // payable/committed state created before the charge.
+    if (!booking.host_id) {
+      return res.status(409).json({ error: "Host context is missing for this booking." });
+    }
+    const hostReadiness = await getHostStripeReadiness(String(booking.host_id));
+    if (!hostReadiness.ready || !hostReadiness.stripeAccountId) {
+      console.error("[api/flex/extend] host not ready for Stripe Connect charge", {
+        hostId: booking.host_id,
+        bookingId: booking.id,
+        stripeAccountId: hostReadiness.stripeAccountId,
+        chargesEnabled: hostReadiness.chargesEnabled,
+        payoutsEnabled: hostReadiness.payoutsEnabled,
+      });
+      return res.status(409).json({ error: "Host is not ready to accept payments.", code: "HOST_NOT_ONBOARDED" });
+    }
+    const hostStripeAccountId = hostReadiness.stripeAccountId;
+
+    // application_fee_amount uses this booking's own existing
+    // platform_fee_bps (the same basis P0-E established for flex/confirm.ts)
+    // and the same per-charge cap semantics confirmed there -- no fresh
+    // calculation invented, no cross-charge aggregate cap.
+    const platformFeeBps = Number(booking.platform_fee_bps);
+    if (!Number.isFinite(platformFeeBps) || platformFeeBps < 0) {
+      console.error("[api/flex/extend] booking has no trustworthy platform_fee_bps", {
+        bookingId: booking.id,
+        raw: booking.platform_fee_bps,
+      });
+      return res.status(500).json({ error: "Unable to determine platform fee for this booking." });
+    }
+    const applicationFeeAmount = Math.min(
+      Math.floor((extensionAmountPence * platformFeeBps) / 10000),
+      PLATFORM_FEE_CAP_PENCE
+    );
+    if (
+      !Number.isInteger(applicationFeeAmount) ||
+      applicationFeeAmount < 0 ||
+      applicationFeeAmount > extensionAmountPence
+    ) {
+      console.error("[api/flex/extend] computed application_fee_amount is invalid", {
+        bookingId: booking.id,
+        extensionAmountPence,
+        platformFeeBps,
+        applicationFeeAmount,
+      });
+      return res.status(500).json({ error: "Invalid application fee amount computed for this extension charge." });
+    }
+
     if (!booking.stripe_payment_intent_id) {
       return res.status(409).json({
         error: "We couldn’t process your payment method. Update your payment details to extend your stay.",
@@ -328,22 +386,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     }
 
     try {
-      extensionPaymentIntent = await stripe.paymentIntents.create({
-        amount: extensionAmountPence,
-        currency: String(booking.currency ?? "GBP").toLowerCase(),
-        payment_method: paymentMethodId,
-        customer: customerId,
-        off_session: true,
-        confirm: true,
-        metadata: {
-          booking_id: String(booking.id),
-          flex_mode: "rolling",
-          flex_window_id: String(heldWindow.id),
-          extension_unit_pence: String(extensionUnitPence),
-          pricing_policy: flexPricingPolicy,
+      extensionPaymentIntent = await stripe.paymentIntents.create(
+        {
+          amount: extensionAmountPence,
+          currency: String(booking.currency ?? "GBP").toLowerCase(),
+          payment_method: paymentMethodId,
+          customer: customerId,
+          off_session: true,
+          confirm: true,
+          application_fee_amount: applicationFeeAmount,
+          transfer_data: {
+            destination: hostStripeAccountId,
+          },
+          metadata: {
+            booking_id: String(booking.id),
+            flex_mode: "rolling",
+            flex_window_id: String(heldWindow.id),
+            extension_unit_pence: String(extensionUnitPence),
+            pricing_policy: flexPricingPolicy,
+          },
+          description: `Avyro rolling flex extension (${booking.id})`,
         },
-        description: `Avyro rolling flex extension (${booking.id})`,
-      });
+        {
+          idempotencyKey: `flex-extend-${heldWindow.id}`,
+        }
+      );
     } catch (error: any) {
       return res.status(402).json({
         error: "Unable to charge the saved card for this extension.",

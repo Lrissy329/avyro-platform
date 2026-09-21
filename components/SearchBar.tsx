@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
 import DatePicker from "react-datepicker";
+import { DAY_USE_AVAILABLE } from "@/lib/launchFeatures";
 
 type InitialQuery = {
   location?: string;
@@ -16,7 +17,7 @@ type Props = {
   onSearch: (filters: any) => void;
   initialQuery?: InitialQuery;
   align?: "left" | "center";
-  variant?: "default" | "compact" | "nav";
+  variant?: "default" | "compact" | "nav" | "console";
 };
 type Guests = { adults: number; children: number; infants: number; pets: number };
 type StayMode = "overnight" | "day_use";
@@ -124,12 +125,12 @@ export default function SearchBar({
   useEffect(() => {
     if (!initialQuery) return;
     if (initialQuery.location) setWhereQuery(initialQuery.location);
-    if (initialQuery.bookingUnit === "hourly") setStayMode("day_use");
+    if (DAY_USE_AVAILABLE && initialQuery.bookingUnit === "hourly") setStayMode("day_use");
     if (initialQuery.bookingUnit === "nightly") setStayMode("overnight");
     if (initialQuery.checkIn) {
       const start = new Date(initialQuery.checkIn);
       if (!Number.isNaN(start.getTime())) {
-        if (initialQuery.bookingUnit === "hourly") {
+        if (DAY_USE_AVAILABLE && initialQuery.bookingUnit === "hourly") {
           setDayUseDate(start);
         } else {
           setDateRange((prev) => ({ ...prev, from: start }));
@@ -162,7 +163,7 @@ export default function SearchBar({
   const { checkInLabel, checkOutLabel } = useMemo(() => {
     const fmt = (d: Date) =>
       d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    if (stayMode === "day_use") {
+    if (DAY_USE_AVAILABLE && stayMode === "day_use") {
       return {
         checkInLabel: dayUseDate ? fmt(dayUseDate) : "Add date",
         checkOutLabel:
@@ -249,11 +250,11 @@ export default function SearchBar({
     // Retain call to onSearch if provided
     onSearch?.({
       location: whereQuery,
-      checkIn: stayMode === "day_use" ? dayUseDate || null : dateRange?.from || null,
-      checkOut: stayMode === "day_use" ? dayUseDate || null : dateRange?.to || null,
-      checkInTime: stayMode === "day_use" ? dayUseStartTime : null,
-      checkOutTime: stayMode === "day_use" ? dayUseEndTime : null,
-      bookingUnit: stayMode === "day_use" ? "hourly" : "nightly",
+      checkIn: DAY_USE_AVAILABLE && stayMode === "day_use" ? dayUseDate || null : dateRange?.from || null,
+      checkOut: DAY_USE_AVAILABLE && stayMode === "day_use" ? dayUseDate || null : dateRange?.to || null,
+      checkInTime: DAY_USE_AVAILABLE && stayMode === "day_use" ? dayUseStartTime : null,
+      checkOutTime: DAY_USE_AVAILABLE && stayMode === "day_use" ? dayUseEndTime : null,
+      bookingUnit: DAY_USE_AVAILABLE && stayMode === "day_use" ? "hourly" : "nightly",
       guests: { ...guests, total: totalGuests },
     });
     setShowWhere(false);
@@ -358,6 +359,10 @@ export default function SearchBar({
     return CalendarHeader;
   };
 
+  const isNav = variant === "nav";
+  const isCompact = variant === "compact";
+  const isConsole = variant === "console";
+
   return (
     <div
       ref={wrapperRef}
@@ -368,10 +373,12 @@ export default function SearchBar({
       {/* Pill */}
       <div
         className={`w-full max-w-5xl border border-neutral-200 bg-white transition-shadow focus-within:ring-2 focus-within:ring-black/5 ${
-          variant === "nav"
+          isNav
             ? "flex items-center overflow-visible rounded-full px-1.5 py-1 shadow-sm hover:shadow-md"
-            : variant === "compact"
+            : isCompact
             ? "flex items-center overflow-visible rounded-2xl px-2.5 py-2 shadow-sm hover:shadow-md lg:px-2 lg:py-1.5"
+            : isConsole
+            ? "grid grid-cols-[minmax(0,1.15fr)_1px_minmax(0,0.9fr)_76px] overflow-hidden rounded-[16px] p-0 shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
             : "flex items-center rounded-2xl px-3 py-2 shadow-md hover:shadow-lg"
         }`}
         role="search"
@@ -385,18 +392,29 @@ export default function SearchBar({
            aria-expanded={showWhere}
            aria-controls={wherePopoverId}
            aria-label="Open location search"
-           className={`flex-[1.1] min-w-0 text-left focus:outline-none bg-transparent ${
-             variant === "nav"
+           className={`flex-[1.1] min-w-0 bg-transparent text-left focus:outline-none ${
+             isNav
                ? "px-2.5 py-1.5 min-h-[40px]"
-               : variant === "compact"
+               : isCompact
                ? "px-3 py-2.5 min-h-[44px] lg:px-2.5 lg:py-2"
+               : isConsole
+               ? "col-start-1 row-start-1 min-h-[72px] overflow-hidden px-5 py-2.5"
                : "px-4 py-3 min-h-[48px] md:min-w-[220px]"
            }`}
          >
-          {variant === "nav" ? (
+          {isNav ? (
             <div className="flex items-center gap-1.5">
               <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center text-neutral-500"><IconPin /></span>
               <span className="truncate text-[13px] font-medium text-neutral-900">{compactLocationLabel}</span>
+            </div>
+          ) : isConsole ? (
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase leading-none tracking-[0.03em] text-neutral-400">
+                Airport
+              </div>
+              <div className="mt-2 max-w-full truncate whitespace-nowrap text-[13px] font-medium leading-5 text-neutral-900">
+                {whereQuery || "Search airport"}
+              </div>
             </div>
           ) : (
             <>
@@ -411,8 +429,10 @@ export default function SearchBar({
 
         {/* Divider */}
         <div
-          className={`hidden sm:block w-px bg-neutral-200/70 ${
-            variant === "nav" ? "h-5" : variant === "compact" ? "h-7" : "h-8"
+          className={`${
+            isConsole ? "col-start-2 row-start-1 block w-px self-stretch bg-neutral-200" : "hidden sm:block w-px bg-neutral-200/70"
+          } ${
+            isConsole ? "" : isNav ? "h-5" : isCompact ? "h-7" : "h-8"
           }`}
           aria-hidden
         />
@@ -426,18 +446,29 @@ export default function SearchBar({
           aria-expanded={showDates}
           aria-controls={datesPopoverId}
           aria-label="Open date and time picker"
-          className={`hidden sm:block flex-[1.4] min-w-0 text-left focus:outline-none bg-transparent ${
-            variant === "nav"
-              ? "px-2.5 py-1.5 min-h-[40px]"
-              : variant === "compact"
-              ? "px-3.5 py-2.5 min-h-[44px] lg:px-3 lg:py-2"
-              : "px-5 py-3 min-h-[48px] md:min-w-[240px]"
+          className={`min-w-0 bg-transparent text-left focus:outline-none ${
+            isNav
+              ? "hidden sm:block flex-[1.4] px-2.5 py-1.5 min-h-[40px]"
+               : isCompact
+               ? "hidden sm:block flex-[1.4] px-3.5 py-2.5 min-h-[44px] lg:px-3 lg:py-2"
+               : isConsole
+               ? "col-start-3 row-start-1 min-h-[72px] overflow-hidden px-5 py-2.5"
+              : "hidden sm:block flex-[1.4] px-5 py-3 min-h-[48px] md:min-w-[240px]"
           }`}
         >
-          {variant === "nav" ? (
+          {isNav ? (
             <div className="flex items-center gap-1.5">
               <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center text-neutral-500"><IconCalendar /></span>
               <span className="truncate text-[13px] font-medium text-neutral-900">{compactDateLabel}</span>
+            </div>
+          ) : isConsole ? (
+            <div>
+              <div className="text-[10.5px] font-semibold uppercase leading-none tracking-[0.03em] text-neutral-400">
+                Dates
+              </div>
+              <div className="mt-2 max-w-full truncate whitespace-nowrap text-[13px] font-medium leading-5 text-neutral-900">
+                {dateTimeLabel === "Add dates" ? "Add dates" : dateTimeLabel}
+              </div>
             </div>
           ) : (
             <>
@@ -458,8 +489,10 @@ export default function SearchBar({
 
         {/* Divider */}
         <div
-          className={`hidden sm:block w-px bg-neutral-200/70 ${
-            variant === "nav" ? "h-5" : variant === "compact" ? "h-7" : "h-8"
+          className={`${
+            isConsole ? "hidden" : "hidden sm:block w-px bg-neutral-200/70"
+          } ${
+            isConsole ? "" : isNav ? "h-5" : isCompact ? "h-7" : "h-8"
           }`}
           aria-hidden
         />
@@ -473,18 +506,29 @@ export default function SearchBar({
           aria-expanded={showGuests}
           aria-controls={guestsPopoverId}
           aria-label="Open guests selector"
-          className={`flex-[0.9] min-w-0 text-left focus:outline-none bg-transparent ${
-            variant === "nav"
-              ? "px-2.5 py-1.5 min-h-[40px]"
-              : variant === "compact"
-              ? "px-3.5 py-2.5 min-h-[44px] lg:px-3 lg:py-2"
-              : "px-5 py-3 min-h-[48px] md:min-w-[160px]"
+          className={`${isConsole ? "hidden" : "min-w-0 bg-transparent text-left focus:outline-none"} ${
+            isNav
+              ? "flex-[0.9] px-2.5 py-1.5 min-h-[40px]"
+              : isCompact
+              ? "flex-[0.9] px-3.5 py-2.5 min-h-[44px] lg:px-3 lg:py-2"
+              : isConsole
+              ? "min-h-[78px] rounded-[18px] border border-neutral-200 px-4 py-3"
+              : "flex-[0.9] px-5 py-3 min-h-[48px] md:min-w-[160px]"
           }`}
         >
-          {variant === "nav" ? (
+          {isNav ? (
             <div className="flex items-center gap-1.5">
               <span aria-hidden className="inline-flex h-3.5 w-3.5 items-center justify-center text-neutral-500"><IconUsers /></span>
               <span className="truncate text-[13px] font-medium text-neutral-900">{compactGuestLabel}</span>
+            </div>
+          ) : isConsole ? (
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">
+                Guests
+              </div>
+              <div className="mt-2 truncate text-[15px] font-medium text-neutral-900">
+                {totalGuests > 0 ? `${totalGuests} guest${totalGuests === 1 ? "" : "s"}` : "Add guests"}
+              </div>
             </div>
           ) : (
             <>
@@ -499,10 +543,12 @@ export default function SearchBar({
 
         {/* Divider before search */}
         <div
-          className={`hidden sm:block w-px bg-neutral-200/70 ${
-            variant === "nav"
+          className={`${isConsole ? "hidden" : "hidden sm:block w-px bg-neutral-200/70"} ${
+            isConsole
+              ? ""
+              : isNav
               ? "mx-0.5 h-5"
-              : variant === "compact"
+              : isCompact
               ? "mx-0.5 h-7"
               : "mx-1 h-8"
           }`}
@@ -513,20 +559,26 @@ export default function SearchBar({
         <button
           type="button"
           onClick={handleSearch}
-          className={`inline-flex shrink-0 items-center justify-center gap-2 bg-[#FEDD02] text-sm font-semibold text-black active:scale-[0.98] transition focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40 ${
-            variant === "nav"
-              ? "ml-0.5 h-9 min-w-[40px] rounded-full px-2.5 shadow-sm hover:bg-[#E6C902] active:bg-[#C9B002] hover:shadow-md"
-              : variant === "compact"
-              ? "ml-1 min-w-[92px] h-10 rounded-xl px-3 shadow-sm hover:bg-[#E6C902] active:bg-[#C9B002] hover:shadow-md"
-              : "ml-2 h-11 rounded-xl px-4 shadow-md hover:bg-[#E6C902] active:bg-[#C9B002] hover:shadow-lg"
+          className={`inline-flex shrink-0 items-center justify-center gap-2 bg-[#FEDD02] text-sm font-semibold text-black transition focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40 active:scale-[0.98] ${
+            isNav
+              ? "ml-0.5 h-9 min-w-[40px] rounded-full px-2.5 shadow-sm hover:bg-[#E6C902] hover:shadow-md active:bg-[#C9B002]"
+            : isCompact
+              ? "ml-1 h-10 min-w-[92px] rounded-xl px-3 shadow-sm hover:bg-[#E6C902] hover:shadow-md active:bg-[#C9B002]"
+              : isConsole
+              ? "col-start-4 row-start-1 min-h-[72px] rounded-none px-0 shadow-none hover:bg-[#E6C902] active:bg-[#C9B002]"
+              : "ml-2 h-11 rounded-xl px-4 shadow-md hover:bg-[#E6C902] hover:shadow-lg active:bg-[#C9B002]"
           }`}
           aria-label="Search"
         >
-          <svg width={variant === "nav" ? "16" : "18"} height={variant === "nav" ? "16" : "18"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width={isNav || isConsole ? "16" : "18"} height={isNav || isConsole ? "16" : "18"} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          {variant === "nav" ? <span className="hidden xl:inline text-[13px]">Search</span> : <span>Search</span>}
+          {isNav ? (
+            <span className="hidden text-[13px] xl:inline">Search</span>
+          ) : isConsole ? null : (
+            <span>Search</span>
+          )}
         </button>
       </div>
 
@@ -590,6 +642,8 @@ export default function SearchBar({
           className={`absolute top-full z-30 ${
             variant === "nav"
               ? "left-1/2 mt-2 w-[760px] max-w-[calc(100vw-2rem)] -translate-x-1/2"
+              : isConsole
+              ? "left-1/2 mt-3 w-[740px] max-w-[calc(100vw-2rem)] -translate-x-1/2"
               : "left-1/2 mt-3 w-full max-w-3xl -translate-x-1/2"
           }`}
         >
@@ -616,26 +670,28 @@ export default function SearchBar({
                 >
                   Overnight
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleStayModeChange("day_use")}
-                  className={`rounded-full border text-xs font-semibold ${
-                    variant === "nav" ? "px-2.5 py-1" : "px-3 py-1"
-                  } ${
-                    stayMode === "day_use"
-                      ? "border-[#FEDD02] bg-[#FEDD02] text-black"
-                      : "border-neutral-300 text-neutral-700 hover:border-neutral-500"
-                  }`}
-                >
-                  Day-use
-                </button>
+                {DAY_USE_AVAILABLE && (
+                  <button
+                    type="button"
+                    onClick={() => handleStayModeChange("day_use")}
+                    className={`rounded-full border text-xs font-semibold ${
+                      variant === "nav" ? "px-2.5 py-1" : "px-3 py-1"
+                    } ${
+                      stayMode === "day_use"
+                        ? "border-[#FEDD02] bg-[#FEDD02] text-black"
+                        : "border-neutral-300 text-neutral-700 hover:border-neutral-500"
+                    }`}
+                  >
+                    Day-use
+                  </button>
+                )}
               </div>
               <div className={`text-neutral-500 ${variant === "nav" ? "text-[11px]" : "text-xs"}`}>
-                {stayMode === "day_use" ? "Same-day stays with a time window." : "Standard overnight stays."}
+                {DAY_USE_AVAILABLE && stayMode === "day_use" ? "Same-day stays with a time window." : "Standard overnight stays."}
               </div>
             </div>
 
-            {stayMode === "overnight" ? (
+            {!DAY_USE_AVAILABLE || stayMode === "overnight" ? (
               <>
                 <div className={`flex items-center flex-wrap ${variant === "nav" ? "gap-1.5 px-1 pb-2" : "gap-2 px-2 pb-2"}`} aria-hidden>
                   {["Exact dates", "± 1 day", "± 2 days", "± 3 days", "± 7 days", "± 14 days"].map(label => (

@@ -346,8 +346,8 @@ export default function MapListingCardV2({
     ? listing.locationFallback ?? listing.location ?? ""
     : listing.location ?? listing.locationFallback ?? "";
   const showStayTotalDetails = showStayTotal && stayTotal != null;
+  // transportBadge is already shown on the photo, so it is not repeated in the text line.
   const metadataLine = [
-    transportBadge,
     typeLabel,
     isSharedStay
       ? listing.sharedTotalSpots
@@ -435,7 +435,7 @@ export default function MapListingCardV2({
                   {titleLine}
                 </h3>
                 {metadataLine ? (
-                  <div className="mt-1 line-clamp-1 text-sm text-neutral-600">{metadataLine}</div>
+                  <div className="mt-1 line-clamp-2 text-sm text-neutral-600">{metadataLine}</div>
                 ) : locationText ? (
                   <div className="mt-1 line-clamp-1 text-sm text-neutral-600">{locationText}</div>
                 ) : null}
@@ -508,7 +508,7 @@ export default function MapListingCardV2({
                 {summaryText}
               </p>
               {metadataLine ? (
-                <div className="mt-2 line-clamp-1 text-[13px] text-neutral-600">{metadataLine}</div>
+                <div className="mt-2 line-clamp-2 text-[13px] text-neutral-600">{metadataLine}</div>
               ) : locationText ? (
                 <div className="mt-2 line-clamp-1 text-[13px] text-neutral-600">{locationText}</div>
               ) : null}

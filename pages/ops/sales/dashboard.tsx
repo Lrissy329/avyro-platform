@@ -3,6 +3,7 @@ import Link from "next/link";
 import OpsLayout from "@/components/ops/OpsLayout";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
+import { formatOpsShortDate } from "@/lib/opsDateFormat";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import type { OpsRole } from "@/lib/opsRbac";
 
@@ -43,12 +44,7 @@ type PageProps = {
   };
 };
 
-const formatDate = (value?: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-};
+const formatDate = (value?: string | null) => formatOpsShortDate(value);
 
 export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => {
   const guard = await requireOpsStaff(ctx, { permission: "ops:sales:read" });

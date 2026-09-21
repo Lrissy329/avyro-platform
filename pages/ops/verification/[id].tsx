@@ -3,6 +3,7 @@ import { useState } from "react";
 import OpsLayout from "@/components/ops/OpsLayout";
 import { requireOpsStaff } from "@/lib/opsAuth";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { formatOpsDateTime } from "@/lib/opsDateFormat";
 import { hasOpsPermission, type OpsRole } from "@/lib/opsRbac";
 
 type VerificationDetail = {
@@ -21,18 +22,7 @@ type PageProps = {
   staffRole: OpsRole;
 };
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "—";
-  return date.toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
+const formatDateTime = (value?: string | null) => formatOpsDateTime(value);
 
 export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => {
   const guard = await requireOpsStaff(ctx, { permission: "ops:verification:read" });

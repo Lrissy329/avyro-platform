@@ -26,12 +26,10 @@ export async function ensureProfile(): Promise<EnsureProfileResult> {
 
   const user = session.user;
   const fullName = resolveDisplayName(user);
-  const email = user.email ?? null;
 
   const { error: profileError } = await supabase.from("profiles").upsert(
     {
       id: user.id,
-      email,
       full_name: fullName,
     },
     { onConflict: "id", ignoreDuplicates: true }
@@ -39,13 +37,6 @@ export async function ensureProfile(): Promise<EnsureProfileResult> {
 
   if (profileError) {
     console.error("[ensureProfile] failed to upsert profile", profileError.message);
-  }
-
-  if (email) {
-    const { error: emailUpdateError } = await supabase.from("profiles").update({ email }).eq("id", user.id);
-    if (emailUpdateError) {
-      console.error("[ensureProfile] failed to sync profile email", emailUpdateError.message);
-    }
   }
 
   const { error: verificationError } = await supabase.from("guest_verifications").upsert(

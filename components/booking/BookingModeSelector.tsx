@@ -23,7 +23,7 @@ export default function BookingModeSelector({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-slate-500">Choose how you want to book</p>
+        <p className="text-xs font-medium text-slate-500">Do you know when you&apos;ll leave?</p>
         {showRollingBadge && supportsFlex ? (
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-600">
             Good for uncertain schedules
@@ -37,9 +37,9 @@ export default function BookingModeSelector({
           onClick={() => onChange("fixed")}
           aria-pressed={value === "fixed"}
         >
-          <p className="text-sm font-semibold">Fixed stay</p>
+          <p className="text-sm font-semibold">Known dates</p>
           <p className={`mt-1 text-xs ${value === "fixed" ? "text-white/80" : "text-slate-500"}`}>
-            Choose fixed dates for a standard booking.
+            Choose your check-in and check-out dates.
           </p>
         </button>
 
@@ -50,7 +50,7 @@ export default function BookingModeSelector({
             onClick={() => onChange("flexible")}
             aria-pressed={value === "flexible"}
           >
-            <p className="text-sm font-semibold">Flexible stay</p>
+            <p className="text-sm font-semibold">Not sure yet</p>
             <p
               className={`mt-1 text-xs ${
                 value === "flexible" ? "text-white/80" : "text-slate-500"

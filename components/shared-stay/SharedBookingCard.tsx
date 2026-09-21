@@ -50,7 +50,7 @@ export function SharedBookingCard({
         {occupancy?.total != null ? (
           <p className="sm:col-span-2">
             {Math.max(0, Math.round(Number(occupancy.filled ?? 0) || 0))} of{" "}
-            {Math.max(1, Math.round(Number(occupancy.total ?? 1) || 1))} spots filled
+            {Math.max(1, Math.round(Number(occupancy.total ?? 1) || 1))} spaces taken
           </p>
         ) : null}
       </div>

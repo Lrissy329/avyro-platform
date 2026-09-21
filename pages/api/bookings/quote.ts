@@ -323,7 +323,7 @@ export default async function handler(
                 : flexExtraNightPricePence != null
                 ? flexExtraNightPricePence / 100
                 : null,
-            amount_due_today: 0,
+            amount_due_today: pricing.total_guest_pence / 100,
           },
           null,
           2
@@ -360,7 +360,8 @@ export default async function handler(
     rolling_extension_unit_price_pence: rollingExtensionUnitPricePence,
     flex_pricing_policy: pricingPolicy,
     discount_tier_applied: discountTierApplied,
-    amount_due_today_pence: 0,
+    // Checkout charges the whole quoted stay up front; only optional flex extras are charged later, if used.
+    amount_due_today_pence: pricing.total_guest_pence,
     base_available: flexAvailability.baseAvailable,
     extra_night_available: flexAvailability.extraNightAvailable,
     rolling_flex_available: flexAvailability.rollingFlexAvailable,

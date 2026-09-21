@@ -1,6 +1,11 @@
 import { differenceInCalendarDays } from "date-fns";
 
-export const SHARED_GROUP_PENDING_HOLD_MINUTES = 15;
+// Matches the Stripe Checkout Session expires_at set in
+// pages/api/shared-groups/checkout.ts (30 minutes) so the capacity hold
+// and the payment window always expire together -- a guest who pays
+// inside the window must not find their spot already released to
+// someone else.
+export const SHARED_GROUP_PENDING_HOLD_MINUTES = 30;
 
 export const parseIsoDateOnly = (value?: string | null) => {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;

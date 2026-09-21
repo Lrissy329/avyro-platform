@@ -23,7 +23,7 @@ import { StartSharedGroupModal } from "@/components/shared-stay/StartSharedGroup
 import type { SharedGroupOption } from "@/components/shared-stay/types";
 import { useSharedStayCheckout } from "@/hooks/useSharedStayCheckout";
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarDays, Clock3, Moon, Repeat2 } from "lucide-react";
+import { CalendarDays, Clock3, Moon } from "lucide-react";
 import type { BookingStayType } from "@/lib/calendarTypes";
 
 type BookingWidgetProps = {
@@ -356,20 +356,17 @@ export default function BookingWidget({
     if (resolvedStayType === "day_use" || resolvedStayType === "split_rest") {
       return {
         label: "Hourly stay",
-        details: `${stayTypeConfig.description} · Locked by host`,
       };
     }
     if (resolvedStayType === "crashpad") {
       return {
         label: "Long stay",
-        details: `${stayTypeConfig.description} · Locked by host`,
       };
     }
     return {
-      label: "Nightly stay",
-      details: `${stayTypeConfig.description} · Locked by host`,
+      label: "Overnight stay",
     };
-  }, [resolvedStayType, stayTypeConfig.description]);
+  }, [resolvedStayType]);
   const selectedBookingModeForQuote: FlexMode =
     selectedBookingType === "flexible"
       ? "extra_night"
@@ -1028,7 +1025,10 @@ export default function BookingWidget({
     : useExtraNightBooking
     ? 1
     : 0;
-  const amountDueTodayPence = Math.max(0, Math.round(Number(quote?.amount_due_today_pence ?? 0)) || 0);
+  // What Checkout charges today: the quoted guest total for the booked dates. Optional flex extras are
+  // charged later, and only if used.
+  const amountDueTodayPence =
+    guestTotalPence != null ? Math.max(0, Math.round(Number(guestTotalPence))) : 0;
   const sharedJoinableGroups = useMemo(
     () => (sharedOptions?.groups ?? []).filter((group) => group.canJoin),
     [sharedOptions?.groups]
@@ -1062,6 +1062,11 @@ export default function BookingWidget({
     Boolean(sharedOptions?.reason) ||
     Boolean(sharedOptions?.groups?.length);
   const hasDateSelection = Boolean(checkInDate) && Boolean(checkOutDate);
+  // A shared stay's date picker used to open only through "Start a new shared stay" -- a button that did not
+  // exist until the picker was already open. On a listing with no group yet, the first guest therefore had
+  // no way to choose dates. The picker is now visible whenever there is nothing to join, once dates are
+  // chosen, or when the guest asks for different dates.
+  const sharedCreationVisible = isSharedStayListing;
   const hasValidDateSelection =
     hasDateSelection &&
     (isHourlyStay ? durationMs > 0 : checkOutDate > checkInDate);
@@ -1184,9 +1189,7 @@ export default function BookingWidget({
       label: useFlexibleBooking ? "Book with flexibility" : "Book this stay",
       disabled: false,
       reason: null,
-      helper: useFlexibleBooking
-        ? "You can extend your stay without rebooking"
-        : "Secure checkout and instant confirmation.",
+      helper: "Secure checkout — confirmed once payment completes.",
     };
   }, [
     hasDateSelection,
@@ -1797,6 +1800,20 @@ export default function BookingWidget({
     onNightlyRangeChange?.({ from: start, to: end });
   };
 
+  // Change how many weeks a shared stay runs. The listing page owns the selected range too (its
+  // Availability calendar), so it must be told as well -- otherwise its sync effect sees the two
+  // disagree and snaps the check-out date straight back to one week.
+  const applySharedWeeks = (weeks: number) => {
+    const safeWeeks = Math.max(1, Math.round(weeks));
+    setStartGroupWeeks(safeWeeks);
+    if (!checkInDate) return;
+    const nextCheckOut = addDaysToDateInput(checkInDate, safeWeeks * 7);
+    setCheckOutDate(nextCheckOut);
+    const from = parseDateInputValue(checkInDate);
+    const to = parseDateInputValue(nextCheckOut);
+    if (from && to && to > from) onNightlyRangeChange?.({ from, to });
+  };
+
   const handleNightlyRangeSelect = (dates: [Date | null, Date | null]) => {
     const [start, end] = dates;
     const clickedDate = end ?? start;
@@ -1917,7 +1934,7 @@ export default function BookingWidget({
     const targetSharedGroupId = selectedSharedGroupId ?? sharedSelectedGroup?.id ?? null;
 
     if (action === "join" && (!targetSharedGroupId || !hasOpenSharedGroup)) {
-      setErr("No open shared group is available for these dates. Start a new group instead.");
+      setErr("No shared stay is available for these dates yet. Start a new one instead.");
       return;
     }
 
@@ -2120,25 +2137,16 @@ export default function BookingWidget({
           </span>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-slate-900">
-              {isSharedStayListing ? "Stay type: Shared stay" : `Stay type: ${staySummary.label}`}
+              {isSharedStayListing ? "Shared stay" : staySummary.label}
             </p>
-            <p className="truncate text-xs text-slate-500">
-              {isSharedStayListing
-                ? `${sharedTotalSpots ?? 0} spot${Number(sharedTotalSpots ?? 0) === 1 ? "" : "s"} · Each guest books and pays individually`
-                : staySummary.details}
-            </p>
+            {isSharedStayListing ? (
+              <p className="truncate text-xs text-slate-500">
+                Professionals only · Each guest pays individually
+              </p>
+            ) : null}
           </div>
         </div>
-        {isSharedStayListing ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-600">
-            Shared
-          </span>
-        ) : hasFlexibleModesEnabled ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-600">
-            <Repeat2 className="h-3.5 w-3.5" />
-            Flexible
-          </span>
-        ) : null}
+
       </div>
 
       {!isSharedStayListing ? (
@@ -2164,14 +2172,9 @@ export default function BookingWidget({
             >
               {selectedBookingType === "flexible" && supportsFlex ? (
                 <div className="space-y-3">
-                  <div>
-                    <p className="text-sm text-slate-600">
-                      Book the stay you need now. Extend if plans change.
-                    </p>
-                    {flexAvailabilityMessage ? (
-                      <p className="mt-2 text-xs font-medium text-slate-700">{flexAvailabilityMessage}</p>
-                    ) : null}
-                  </div>
+                  {flexAvailabilityMessage ? (
+                    <p className="text-xs font-medium text-slate-700">{flexAvailabilityMessage}</p>
+                  ) : null}
 
                   <AnimatePresence mode="wait" initial={false}>
                     {activeFlexType === "extra_night" ? (
@@ -2209,25 +2212,8 @@ export default function BookingWidget({
           sharedOptionsData={sharedOptions}
           loading={sharedOptionsLoading}
           error={sharedOptionsError}
-          showCreationFlow={showSharedCreationFlow}
-          joinDisabled={sharedJoinDisabled}
-          startDisabled={checkInDate && checkOutDate ? sharedStartDisabled : false}
-          joinLoading={sharedCheckoutLoadingAction === "join"}
-          startLoading={sharedCheckoutLoadingAction === "start"}
-          onJoin={() => {
-            setErr(null);
-            setMsg(null);
-            setShowJoinSharedModal(true);
-          }}
           onQuickJoinGroup={(group) => {
             handleQuickJoinSharedGroup(group);
-          }}
-          onStartGroup={() => {
-            setErr(null);
-            setMsg(null);
-            setShowSharedCreationFlow(true);
-            setShowCalendar(true);
-            calendarTriggerRef.current?.focus();
           }}
         />
       )}
@@ -2275,22 +2261,21 @@ export default function BookingWidget({
             </div>
           </div>
         </div>
-      ) : !isSharedStayListing || showSharedCreationFlow ? (
+      ) : !isSharedStayListing || sharedCreationVisible ? (
         <div>
           <Label className="text-xs font-medium text-slate-500">
-            {isSharedStayListing ? "Choose shared stay dates" : "Dates"}
+            {isSharedStayListing ? (hasOpenSharedGroup && !hasDateSelection ? "Or choose your own dates" : "Choose your dates") : "Dates"}
           </Label>
           <div className="relative">
             <button
               type="button"
               onClick={() => setShowCalendar(true)}
-              className="mt-2 flex w-full items-center justify-between rounded-2xl border border-slate-200 px-3 py-3 text-left text-sm text-[#4B5563] transition hover:border-slate-300"
+              className="mt-2 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 py-3 text-left text-sm text-[#4B5563] transition hover:border-slate-300 hover:bg-slate-50"
               aria-expanded={showCalendar}
               ref={calendarTriggerRef}
             >
               <span className="inline-flex items-center gap-2 text-slate-500">
                 <CalendarDays className="h-4 w-4" />
-                <span className="text-xs font-medium">Dates</span>
               </span>
               <span className="font-medium text-[#0B0D10]">{dateSummary}</span>
             </button>
@@ -2445,12 +2430,7 @@ export default function BookingWidget({
                     <button
                       key={weeksOption}
                       type="button"
-                      onClick={() => {
-                        setStartGroupWeeks(weeksOption);
-                        if (checkInDate) {
-                          setCheckOutDate(addDaysToDateInput(checkInDate, weeksOption * 7));
-                        }
-                      }}
+                      onClick={() => applySharedWeeks(weeksOption)}
                       className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
                         isSelected
                           ? "border-slate-900 bg-slate-900 text-white"
@@ -2466,7 +2446,7 @@ export default function BookingWidget({
           ) : null}
         </div>
       ) : null}
-      {isSharedStayListing && !isHourlyStay && showSharedCreationFlow ? (
+      {sharedCreationVisible && !isHourlyStay ? (
         <p className="text-xs text-slate-600">
           {selectedSharedNights > 0
             ? isSharedWeeksRangeValid
@@ -2579,20 +2559,6 @@ export default function BookingWidget({
         </p>
       )}
 
-      <div className="space-y-1.5 pt-0.5">
-        <Button
-          className="w-full"
-          size="lg"
-          disabled={loading || ctaState.disabled}
-          onClick={handleReserve}
-        >
-          {loading ? "Reserving…" : ctaState.label}
-        </Button>
-        {ctaState.helper ? (
-          <p className="text-center text-xs text-slate-500">{ctaState.helper}</p>
-        ) : null}
-      </div>
-
       <div className="space-y-2 border-t border-slate-100/80 pt-2.5">
         <p className="text-sm font-semibold text-slate-900">Booking summary</p>
         <div className="flex items-start justify-between gap-3 text-sm">
@@ -2606,24 +2572,14 @@ export default function BookingWidget({
                   }`
                 : `Cost for selected dates ${confirmedStayLine ? `(${confirmedStayLine})` : ""}`}
             </p>
+            <p className="text-xs text-slate-500">Includes all fees</p>
           </div>
           <p className="font-mono text-base font-semibold tabular-nums text-slate-900">
             {guestTotal != null ? formatCurrency(guestTotal) : "—"}
           </p>
         </div>
 
-        {isSharedStayListing ? (
-          <div className="space-y-0.5 text-sm text-slate-700">
-            <p className="font-medium text-slate-900">Shared spot pricing</p>
-            <p>
-              {sharedPerPersonWeeklyPricePounds != null
-                ? formatCurrency(sharedPerPersonWeeklyPricePounds)
-                : "—"}{" "}
-              / person / week
-            </p>
-            <p className="text-xs text-slate-500">Each guest books and pays individually.</p>
-          </div>
-        ) : useFlexibleBooking ? (
+        {isSharedStayListing ? null : useFlexibleBooking ? (
           <div className="space-y-0.5 text-sm text-slate-700">
             {useExtraNightBooking ? (
               <>
@@ -2632,9 +2588,6 @@ export default function BookingWidget({
                   {flexExtraNightPrice != null
                     ? `${formatCurrency(flexExtraNightPrice)} if used`
                     : "—"}
-                </p>
-                <p className="text-xs text-slate-500">
-                  Confirm by {flexExtensionNoticeHoursResolved} hours before checkout
                 </p>
               </>
             ) : (
@@ -2656,16 +2609,28 @@ export default function BookingWidget({
         <div className="rounded-lg bg-slate-50/45 px-3 py-2">
           <p className="text-xs font-medium text-slate-500">Pay today</p>
           <p className="font-mono text-base font-semibold tabular-nums text-slate-900">
-            {isSharedStayListing
-              ? guestTotalPence != null
-                ? formatCurrency(Math.max(0, Math.round(Number(guestTotalPence))) / 100)
-                : "—"
-              : formatCurrency(amountDueTodayPence / 100)}
+            {guestTotalPence != null ? formatCurrency(amountDueTodayPence / 100) : "—"}
           </p>
           <p className="text-xs text-slate-500">
-            {isSharedStayListing ? "You’ll pay securely to reserve your spot" : "You won’t be charged yet"}
+            {isSharedStayListing
+              ? "You’ll pay securely to reserve your spot"
+              : "You’ll confirm and pay securely on the next screen"}
           </p>
         </div>
+      </div>
+
+      <div className="space-y-1.5 pt-1">
+        <Button
+          className="w-full"
+          size="lg"
+          disabled={loading || ctaState.disabled}
+          onClick={handleReserve}
+        >
+          {loading ? "Reserving…" : ctaState.label}
+        </Button>
+        {ctaState.helper ? (
+          <p className="text-center text-xs text-slate-500">{ctaState.helper}</p>
+        ) : null}
       </div>
       </Card>
 
@@ -2702,12 +2667,7 @@ export default function BookingWidget({
             maxWeeks={sharedOptions?.maxWeeks ?? sharedMaxWeeks ?? 12}
             selectedDateRange={sharedDateRange}
             selectedWeeks={startGroupWeeks}
-            onWeeksChange={(weeks) => {
-              setStartGroupWeeks(weeks);
-              if (checkInDate) {
-                setCheckOutDate(addDaysToDateInput(checkInDate, Math.max(1, weeks) * 7));
-              }
-            }}
+            onWeeksChange={applySharedWeeks}
             loading={sharedCheckoutLoadingAction === "start"}
             error={err}
             onCheckout={() => startSharedCheckout("start")}
@@ -2720,7 +2680,7 @@ export default function BookingWidget({
           <DialogHeader>
             <DialogTitle>Verification required</DialogTitle>
             <DialogDescription>
-              Verify for work travel to Instant Book this stay. Required level: {verificationRequired ?? 1}.
+              Verify your account to Instant Book this stay.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="mt-6">

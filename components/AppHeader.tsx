@@ -5,6 +5,7 @@ import { useRouter } from "next/router";
 
 import SearchBar from "@/components/SearchBar";
 import { supabase } from "@/lib/supabaseClient";
+import { SUPPORT_EMAIL } from "@/lib/support";
 import {
   getHostingHomeHref,
   getTravellingHomeHref,
@@ -49,6 +50,17 @@ const TRAVELLING_NAV = [
   { label: "Messages", href: "/guest/messages" },
 ];
 
+// What a visitor who is not logged in sees: no account areas (Trips / Payments / Messages), just the
+// ways in. "Become a host" matches the hero, banner and footer on the homepage.
+const LOGGED_OUT_NAV = [
+  { label: "Search stays", href: "/search" },
+  { label: "Become a host", href: "/host/create-listing" },
+  { label: "How it works", href: "/#how-it-works" },
+];
+
+const YELLOW_CTA_CLASS =
+  "group relative h-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#FEDD02] px-4 text-sm font-semibold text-black shadow-md transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[#E6C902] hover:shadow-[0_8px_16px_rgba(201,176,2,0.32)] active:translate-y-0 active:scale-[0.99] active:bg-[#C9B002] focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40";
+
 const HOSTING_NAV = [
   { label: "Your places", href: "/host/listings" },
   { label: "Calendar", href: "/host/calendar" },
@@ -77,18 +89,33 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
   const [profile, setProfile] = useState<Profile | null>(initialProfile);
   const [loadingProfile, setLoadingProfile] = useState(!initialProfile);
   const [signingOut, setSigningOut] = useState(false);
+  const [authTimedOut, setAuthTimedOut] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [switchingRole, setSwitchingRole] = useState<ActiveRole | null>(null);
+
+  // a new avatar URL gets a fresh chance to load
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [profile?.avatar_url]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAuthTimedOut(true), 1200);
+    return () => window.clearTimeout(timer);
+  }, []);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
+    const handleAuthFailure = () => {
+      if (!active) return;
+      // A blocked or interrupted auth request should leave the header signed out,
+      // not surface as an unhandled client-side error.
+      setProfile(null);
+      setLoadingProfile(false);
+    };
 
+    const loadProfileForUser = async (user: { id: string; email?: string | null; user_metadata?: any } | null | undefined) => {
       if (!user) {
         if (!active) return;
         setProfile(null);
@@ -125,10 +152,27 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
             }
       );
       setLoadingProfile(false);
-    })();
+    };
+
+    void supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => loadProfileForUser(session?.user ?? null))
+      .catch(handleAuthFailure);
+
+    // AppHeader is a persistent shared layout component -- it is not
+    // remounted by a client-side router.push() between pages. Without this
+    // subscription, the header's profile state only ever reflected whatever
+    // was true at first mount, so a sign-out (or signing in as a different
+    // user right after) was never reflected until a full page reload.
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void loadProfileForUser(session?.user ?? null).catch(handleAuthFailure);
+    });
 
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
   }, [initialProfile]);
 
@@ -158,7 +202,12 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
   const canHost = hasHostAccess(profile);
   const canGuest = hasGuestAccess(profile);
   const contextLabel = activeRole === "host" ? "Hosting" : "Travelling";
-  const navItems = activeRole === "host" ? HOSTING_NAV : TRAVELLING_NAV;
+  // Hide the auth-dependent parts briefly while the session loads (so a logged-in user never sees the
+  // visitor menu flash by), but never for long: after 1.2s a slow or stuck lookup falls back to the
+  // visitor header instead of leaving it empty. It updates as soon as a profile does arrive.
+  const authKnown = Boolean(profile) || !loadingProfile || authTimedOut;
+  const isLoggedOut = !profile && authKnown;
+  const navItems = isLoggedOut ? LOGGED_OUT_NAV : activeRole === "host" ? HOSTING_NAV : TRAVELLING_NAV;
   const isResultsPage = router.pathname === "/search";
   const headerSearchGuests = useMemo(() => {
     const rawGuests = router.query.guests;
@@ -191,6 +240,11 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
         await onSignOut();
       } else {
         await supabase.auth.signOut();
+        // Immediate, synchronous-feeling clear -- the onAuthStateChange
+        // subscription above will also fire and confirm this, but the
+        // menu/pill should never render stale logged-in state even for the
+        // brief window before that event is delivered.
+        setProfile(null);
         router.push("/login");
       }
     } catch (err) {
@@ -203,7 +257,8 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
   const isSameRoute = (href: string) => normalizePath(router.asPath) === normalizePath(href);
 
   const go = (href: string) => {
-    if (!isSameRoute(href)) {
+    // hash links (e.g. /#how-it-works) must always navigate, even when already on that page
+    if (href.includes("#") || !isSameRoute(href)) {
       router.push(href).catch(() => null);
     }
     setMenuOpen(false);
@@ -256,7 +311,7 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
       .join("") || "F";
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-slate-200/70 bg-white/82 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl">
+    <header className="sticky top-0 z-50 w-full border-b border-slate-200/70 bg-white/95 shadow-[0_1px_0_rgba(15,23,42,0.03)] backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-6 lg:px-8">
         <button
           type="button"
@@ -315,14 +370,22 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
           </div>
         ) : null}
 
-        <div className={cx("hidden items-center gap-6 md:flex", isResultsPage && "lg:hidden")}>
+        <div
+          className={cx(
+            "hidden items-center gap-6 md:flex",
+            isResultsPage && "lg:hidden",
+            !authKnown && "invisible"
+          )}
+        >
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={cx(
                 "text-sm font-medium text-slate-600 transition-colors duration-200 hover:text-slate-900",
-                normalizePath(router.asPath).startsWith(normalizePath(item.href)) && "text-slate-900"
+                !item.href.includes("#") &&
+                  normalizePath(router.asPath).startsWith(normalizePath(item.href)) &&
+                  "text-slate-900"
               )}
             >
               {item.label}
@@ -334,7 +397,10 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
           {!profile ? (
             <Link
               href="/login"
-              className="hidden text-sm font-medium text-slate-600 transition-colors duration-200 hover:text-slate-900 sm:inline-flex"
+              className={cx(
+                "inline-flex text-sm font-medium text-slate-600 transition-colors duration-200 hover:text-slate-900",
+                !authKnown && "invisible"
+              )}
             >
               Log in
             </Link>
@@ -359,16 +425,23 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                 ? "Switch to Travelling"
                 : "Switch to Hosting"}
             </button>
-          ) : (
+          ) : !profile ? (
             <Link
-              href="/search"
-              className="group relative hidden h-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#FEDD02] px-4 text-sm font-semibold text-black shadow-md transition-all duration-200 ease-out hover:-translate-y-px hover:bg-[#E6C902] hover:shadow-[0_8px_16px_rgba(201,176,2,0.32)] active:translate-y-0 active:scale-[0.99] active:bg-[#C9B002] focus:outline-none focus:ring-4 focus:ring-[#FEDD02]/40 sm:inline-flex"
+              href="/login"
+              className={cx("hidden sm:inline-flex", YELLOW_CTA_CLASS, !authKnown && "invisible")}
             >
+              <span className="relative z-10">Sign up</span>
+            </Link>
+          ) : (
+            <Link href="/search" className={cx("hidden sm:inline-flex", YELLOW_CTA_CLASS)}>
               <span className="relative z-10">Search stays</span>
             </Link>
           )}
 
-          <div ref={dropdownRef} className="relative">
+          <div
+            ref={dropdownRef}
+            className={cx("relative", authKnown ? isLoggedOut && "md:hidden" : "md:invisible")}
+          >
             <button
               type="button"
               onClick={() => setMenuOpen((prev) => !prev)}
@@ -377,9 +450,23 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
               aria-label="Open menu"
               className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2 py-1.5 transition-all duration-200 ease-out hover:-translate-y-px hover:border-slate-300 hover:shadow-sm"
             >
+              {isLoggedOut ? (
+                <span aria-hidden className="flex h-7 w-7 items-center justify-center text-slate-700">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-5 w-5">
+                    <path d="M4 7h16M4 12h16M4 17h16" />
+                  </svg>
+                </span>
+              ) : (
+              <>
               <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-slate-100">
-                {profile?.avatar_url ? (
-                  <img src={profile.avatar_url} alt="Profile" className="h-full w-full object-cover" />
+                {profile?.avatar_url && !avatarFailed ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt="Profile"
+                    referrerPolicy="no-referrer"
+                    onError={() => setAvatarFailed(true)}
+                    className="h-full w-full object-cover"
+                  />
                 ) : loadingProfile ? (
                   <span className="h-full w-full animate-pulse bg-slate-200" />
                 ) : (
@@ -395,6 +482,8 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                 {profile ? displayName.split(" ")[0] : "Menu"}
               </span>
               <span className="text-xs text-slate-400">▾</span>
+              </>
+              )}
             </button>
 
             {menuOpen ? (
@@ -488,7 +577,16 @@ export function AppHeader({ notificationCount, onSignOut, initialProfile = null 
                       <ButtonMenuItem label="Log in or sign up" onClick={() => go("/login")} strong />
                       <hr className="my-1 border-slate-200" />
                       <ButtonMenuItem label="Search stays" onClick={() => go("/search")} />
-                      <ButtonMenuItem label="Host a place" onClick={() => go("/role-setup")} />
+                      <ButtonMenuItem label="Become a host" onClick={() => go("/host/create-listing")} />
+                      <ButtonMenuItem label="How it works" onClick={() => go("/#how-it-works")} />
+                      <hr className="my-1 border-slate-200" />
+                      <ButtonMenuItem
+                        label="Contact support"
+                        onClick={() => {
+                          window.location.href = `mailto:${SUPPORT_EMAIL}`;
+                          setMenuOpen(false);
+                        }}
+                      />
                     </div>
                   </div>
                 )}

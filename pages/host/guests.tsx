@@ -19,6 +19,7 @@ import { ensureProfile } from "@/lib/ensureProfile";
 import { formatCurrency, formatRangeSummary } from "@/lib/dateUtils";
 import { supabase } from "@/lib/supabaseClient";
 import type { LinearCalendarEvent, BookingStatus } from "@/lib/calendarTypes";
+import { SUPPORT_EMAIL } from "@/lib/support";
 
 const statusStyles: Record<string, string> = {
   confirmed: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -61,7 +62,6 @@ type GuestProfile = {
   headline?: string | null;
   bio?: string | null;
   avatar_url: string | null;
-  verification_level: number | null;
   verification_status: string | null;
 };
 
@@ -103,17 +103,14 @@ const formatDate = (value?: string | null) => {
 const resolveVerification = (profile?: GuestProfile | null) => {
   const raw = (profile?.verification_status ?? "").toLowerCase();
   if (raw === "verified" || raw === "pending" || raw === "rejected") return raw;
-  if ((profile?.verification_level ?? 0) >= 1) return "verified";
   return "unverified";
 };
 
 const resolveVerificationLabel = (profile?: GuestProfile | null) => {
   const raw = (profile?.verification_status ?? "").toLowerCase();
-  const level = Number(profile?.verification_level ?? 0) || 0;
   if (raw === "pending") return "Verification pending";
   if (raw === "rejected") return "Verification rejected";
-  if (raw === "verified" && level >= 2) return "Document reviewed";
-  if (raw === "verified" || level >= 1) return "Work email verified";
+  if (raw === "verified") return "Verified";
   return "No verification yet";
 };
 
@@ -198,21 +195,29 @@ export default function HostGuestsPage() {
     ) as string[];
 
     if (guestIds.length > 0) {
-      const { data: guestRows, error: guestError } = await supabase
-        .from("profiles")
-        .select("id, full_name, headline, bio, avatar_url, verification_level, verification_status")
-        .in("id", guestIds);
+      const guestResults = await Promise.all(
+        guestIds.map(async (guestId) => {
+          try {
+            const response = await fetch("/api/host/guests/profile", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ guestId }),
+            });
+            if (!response.ok) return null;
+            const payload = await response.json();
+            return payload as GuestProfile;
+          } catch {
+            return null;
+          }
+        })
+      );
 
-      if (!guestError && guestRows) {
-        const guestLookup = (guestRows as GuestProfile[]).reduce<Record<string, GuestProfile>>(
-          (acc, row) => {
-            acc[row.id] = row;
-            return acc;
-          },
-          {}
-        );
-        setGuests(guestLookup);
-      }
+      const guestLookup = guestResults.reduce<Record<string, GuestProfile>>((acc, row) => {
+        if (!row?.id) return acc;
+        acc[row.id] = row;
+        return acc;
+      }, {});
+      setGuests(guestLookup);
     }
 
     if (listingIds.length > 0) {
@@ -311,12 +316,18 @@ export default function HostGuestsPage() {
         "Cancel this booking? Guests will be notified and dates will reopen."
       );
       if (!confirmCancel) return;
-      const { error: updateError } = await supabase
-        .from("bookings")
-        .update({ status: "cancelled" })
-        .eq("id", bookingId);
-      if (updateError) {
-        alert(updateError.message ?? "Unable to cancel booking.");
+      const response = await fetch("/api/host/bookings/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookingId }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        alert(
+          payload?.code === "BOOKING_REQUIRES_SUPPORT_CANCELLATION"
+            ? `This booking is paid. Contact ${SUPPORT_EMAIL} to cancel.`
+            : payload?.error ?? "Unable to cancel booking."
+        );
         return;
       }
       await loadBookings();

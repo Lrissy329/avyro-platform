@@ -2,6 +2,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { SUPPORT_EMAIL } from "@/lib/support";
 
 type BookingRow = {
   id: string;
@@ -123,7 +124,17 @@ export default function BookingSuccessPage() {
     if (!sessionId || typeof sessionId !== "string") return;
     setSyncState("syncing");
     const run = async () => {
-      const maxAttempts = 3;
+      // stripe-webhook.ts is now the sole finalizer of a booking (P0-G) --
+      // this endpoint no longer finalizes anything itself, it only reports
+      // whether that webhook-driven write has landed yet. The webhook
+      // normally lands within a couple of seconds of Stripe redirecting
+      // back here, but it's a genuinely separate, asynchronous delivery,
+      // so this poll needs more patience than when confirm-session.ts used
+      // to finalize synchronously in the same request. 6 attempts at
+      // attempt*1000ms (~15s total worst case) is a modest increase over
+      // the previous 3 attempts at attempt*500ms (~3s), not a new
+      // realtime mechanism.
+      const maxAttempts = 6;
       try {
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
           const resp = await fetch(`/api/stripe/confirm-session?session_id=${sessionId}`);
@@ -132,12 +143,18 @@ export default function BookingSuccessPage() {
             if (payload?.bookingId && typeof payload.bookingId === "string") {
               setResolvedBookingId(payload.bookingId);
             }
-            setSyncState("done");
-            return;
-          }
-          if (attempt < maxAttempts && resp.status >= 409) {
-            await new Promise((resolve) => setTimeout(resolve, attempt * 500));
-            continue;
+            if (payload?.status === "finalized") {
+              setSyncState("done");
+              return;
+            }
+            // status === "pending" -- Stripe may already show this session
+            // as paid, but the webhook hasn't finalized the booking yet.
+            // Keep polling; this is not an error.
+            if (attempt < maxAttempts) {
+              await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+              continue;
+            }
+            throw new Error("Payment confirmation is taking longer than expected.");
           }
           throw new Error(payload?.error ?? "Failed to confirm payment.");
         }
@@ -148,6 +165,10 @@ export default function BookingSuccessPage() {
     };
     run();
   }, [sessionId]);
+
+  const isPaidConfirmed = booking?.status === "paid" || booking?.status === "confirmed";
+  const isPaymentFailed = booking?.status === "payment_failed";
+  const isVerifying = !isPaidConfirmed && !isPaymentFailed;
 
   const heroPhoto = useMemo(
     () => firstPhoto(booking?.listing?.photos) ?? "/placeholder.jpg",
@@ -222,14 +243,8 @@ export default function BookingSuccessPage() {
     if (!booking) {
       return (
         <p className="text-sm text-gray-600">
-          Thanks for your payment! We&apos;re finalising your booking
-          {resolvedBookingId ? (
-            <>
-              {" "}
-              (<code>{resolvedBookingId}</code>)
-            </>
-          ) : null}
-          . Refresh in a moment or check your dashboard for confirmation.
+          We&apos;re finalising your booking. Refresh in a moment or check your dashboard for
+          confirmation.
         </p>
       );
     }
@@ -250,11 +265,6 @@ export default function BookingSuccessPage() {
         : booking.status === "payment_failed"
         ? "Payment failed"
         : booking.status ?? "pending";
-
-    const payoutStatusLabel =
-      booking.payout_status === "awaiting_payout"
-        ? "Awaiting payout"
-        : booking.payout_status ?? "pending";
 
     return (
       <>
@@ -290,24 +300,20 @@ export default function BookingSuccessPage() {
             <dt className="font-medium text-gray-600">Booking status</dt>
             <dd className="text-right">{bookingStatusLabel}</dd>
           </div>
-          <div className="flex justify-between gap-4">
-            <dt className="font-medium text-gray-600">Payout status</dt>
-            <dd className="text-right">{payoutStatusLabel}</dd>
-          </div>
         </dl>
-        {booking.status === "paid" || booking.status === "confirmed" ? (
+        {isPaidConfirmed ? (
           <p className="mt-4 text-sm text-[#0B0D10] bg-[#14FF62]/15 border border-[#14FF62]/40 rounded-xl px-3 py-2">
             You’re all set—your reservation is confirmed and the host has been notified. You can
             manage the stay or message your host from your dashboard.
           </p>
-        ) : booking.status === "payment_failed" ? (
+        ) : isPaymentFailed ? (
           <p className="mt-4 text-sm text-[#E5484D] bg-[#E5484D]/10 border border-[#E5484D]/30 rounded-xl px-3 py-2">
-            Your payment didn’t go through. Please try again from your dashboard.
+            No payment was taken. If you&apos;d like help completing this booking, contact{" "}
+            {SUPPORT_EMAIL}.
           </p>
         ) : (
           <p className="mt-4 text-sm text-[#4B5563] bg-[#0B0D10]/5 border border-[#0B0D10]/10 rounded-xl px-3 py-2">
-            We&apos;ve logged your payment and are waiting on the host to finalise the booking. Keep
-            an eye on your dashboard for updates.
+            We&apos;re confirming your payment. Keep an eye on your dashboard for updates.
           </p>
         )}
       </>
@@ -319,27 +325,41 @@ export default function BookingSuccessPage() {
       <div className="mx-auto max-w-4xl px-6 py-16">
         <div className="rounded-3xl bg-white shadow-xl border border-slate-200 px-8 py-10 space-y-10">
           <header>
-            <div className="flex items-center gap-3 text-[#14FF62]">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#14FF62]/15">
-                ✓
-              </span>
-              <h1 className="text-2xl font-semibold text-gray-900">Payment successful</h1>
-            </div>
-            <p className="mt-4 text-sm text-gray-600">
-              Thanks for booking with Veloro! We&apos;ve reserved your stay and notified the host.
-              You&apos;ll receive email confirmation shortly.
-            </p>
-            {sessionId && (
-              <p className="mt-2 text-xs text-gray-500">
-                Checkout session: <code className="font-mono">{sessionId}</code>
-              </p>
+            {isPaidConfirmed ? (
+              <div className="flex items-center gap-3 text-[#14FF62]">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#14FF62]/15">
+                  ✓
+                </span>
+                <h1 className="text-2xl font-semibold text-gray-900">Payment successful</h1>
+              </div>
+            ) : isPaymentFailed ? (
+              <div className="flex items-center gap-3 text-[#E5484D]">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E5484D]/15">
+                  !
+                </span>
+                <h1 className="text-2xl font-semibold text-gray-900">Payment didn&apos;t go through</h1>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 text-slate-500">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200/70">
+                  ⋯
+                </span>
+                <h1 className="text-2xl font-semibold text-gray-900">Confirming your booking…</h1>
+              </div>
             )}
-            {syncState === "syncing" && (
+            <p className="mt-4 text-sm text-gray-600">
+              {isPaidConfirmed
+                ? "Thanks for booking with Veloro! We've reserved your stay and notified the host. You'll receive email confirmation shortly."
+                : isPaymentFailed
+                ? `No payment was taken. If you'd like help completing this booking, contact ${SUPPORT_EMAIL}.`
+                : "We're confirming your payment with Stripe. This usually takes a few seconds — this page will update automatically."}
+            </p>
+            {isVerifying && syncState === "syncing" && (
               <p className="mt-2 text-xs text-[#4B5563]">
                 Syncing your booking status…
               </p>
             )}
-            {syncState === "error" && !booking && (
+            {isVerifying && syncState === "error" && !booking && (
               <p className="mt-2 text-xs text-[#E5484D]">
                 We couldn&apos;t verify the payment automatically. Your booking may take a moment to
                 update in the dashboard.
@@ -347,7 +367,7 @@ export default function BookingSuccessPage() {
             )}
           </header>
 
-          {booking && (
+          {isPaidConfirmed && booking && (
             <div className="grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
               <div className="overflow-hidden rounded-3xl border border-slate-200 bg-slate-900/90 text-white shadow-lg">
                 <div className="h-56 w-full overflow-hidden">

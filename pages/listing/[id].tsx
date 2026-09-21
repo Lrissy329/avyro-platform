@@ -15,6 +15,7 @@ import {
   getServiceFeeRate,
 } from "@/lib/pricing";
 import { mapAmenities } from "@/lib/amenities";
+import { SUPPORT_EMAIL } from "@/lib/support";
 import {
   ChatBubbleLeftRightIcon,
   CurrencyPoundIcon,
@@ -70,6 +71,7 @@ type TransportSummary = {
   public_transport_buffer_minutes?: number | null;
   public_transport_transfers: number | null;
   public_transport_modes: string[] | null;
+  public_transport_first_departure?: string | null;
   taxi_duration_minutes: number | null;
   taxi_typical_minutes?: number | null;
   taxi_buffer_minutes?: number | null;
@@ -83,8 +85,7 @@ type HostProfile = {
   bio?: string | null;
   display_name?: string | null;
   headline?: string | null;
-  verification_level?: number | null;
-  verification_status?: string | null;
+  is_verified?: boolean | null;
 };
 type ListingReviewsApiSummary = {
   count: number;
@@ -111,6 +112,27 @@ type ListingReviewsApiResponse = {
   summary: ListingReviewsApiSummary;
   reviews: ListingReviewsApiReview[];
 };
+const TRANSPORT_COLUMNS =
+  "public_transport_duration_minutes, public_transport_typical_minutes, public_transport_buffer_minutes, public_transport_transfers, public_transport_modes, taxi_duration_minutes, taxi_typical_minutes, taxi_buffer_minutes, taxi_distance_km, taxi_cost_min, taxi_cost_max";
+
+// Saved airport travel times for a listing. public_transport_first_departure comes from a newer migration,
+// so if selecting it fails the lookup is retried without it.
+const loadTransportSummary = async (
+  listingId: string,
+  poiId?: string | null
+): Promise<TransportSummary | null> => {
+  const run = (columns: string) => {
+    let query = supabase.from("listing_transport_summaries").select(columns).eq("listing_id", listingId);
+    if (poiId) query = query.eq("poi_id", poiId);
+    return query.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+  };
+  let result: { data: unknown; error: unknown } = await run(
+    `${TRANSPORT_COLUMNS}, public_transport_first_departure`
+  );
+  if (result.error) result = await run(TRANSPORT_COLUMNS);
+  return (result.data as TransportSummary) ?? null;
+};
+
 const BUCKET = "listing-photos";
 const toPublicUrl = (pathOrUrl?: string | null): string | null => {
   if (!pathOrUrl) return null;
@@ -234,6 +256,12 @@ const formatShortRange = (date?: Date | null) => {
 export default function ListingDetail() {
   const router = useRouter();
   const { id } = router.query;
+  const [showCancelledNotice, setShowCancelledNotice] = useState(false);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    setShowCancelledNotice(router.query.payment === "cancelled");
+  }, [router.isReady, router.query.payment]);
   const [listing, setListing] = useState<DbListing | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -253,13 +281,6 @@ export default function ListingDetail() {
     pets: 0,
   });
   const [showGuests, setShowGuests] = useState(false);
-  const [bookingLoading, setBookingLoading] = useState(false);
-  const [bookingSuccess, setBookingSuccess] = useState(false);
-  const [bookingError, setBookingError] = useState<string | null>(null);
-  const totalGuests = useMemo(
-    () => guests.adults + guests.children + guests.infants + guests.pets,
-    [guests]
-  );
   const rentalTypeLabel = listing?.rental_type
     ? RENTAL_TYPE_LABELS[listing.rental_type] ?? listing.rental_type.replace(/_/g, " ")
     : null;
@@ -325,23 +346,15 @@ export default function ListingDetail() {
       setListing(mappedListing);
       setPhotoUrls(normalizedPhotos);
       if (data.primary_poi_id) {
-        const { data: transportRow } = await supabase
-          .from("listing_transport_summaries")
-          .select(
-            "public_transport_duration_minutes, public_transport_typical_minutes, public_transport_buffer_minutes, public_transport_transfers, public_transport_modes, taxi_duration_minutes, taxi_typical_minutes, taxi_buffer_minutes, taxi_distance_km, taxi_cost_min, taxi_cost_max"
-          )
-          .eq("listing_id", data.id)
-          .eq("poi_id", data.primary_poi_id)
-          .maybeSingle();
-        setTransportSummary((transportRow as TransportSummary) ?? null);
+        setTransportSummary(await loadTransportSummary(data.id, data.primary_poi_id));
       } else {
         setTransportSummary(null);
       }
       setLoading(false);
       if (data.user_id) {
         const { data: profile } = await supabase
-          .from("profiles")
-          .select("full_name, avatar_url, display_name, headline, bio, verification_level, verification_status")
+          .from("public_profiles")
+          .select("full_name, avatar_url, display_name, headline, bio, is_verified")
           .eq("id", data.user_id)
           .single();
         if (profile) setHost(profile as HostProfile);
@@ -442,6 +455,48 @@ export default function ListingDetail() {
     [listing?.amenities?.join("|") ?? "__fallback__"]
   );
   const airportAreaLabel = listing?.airport_code ? listing.airport_code : null;
+  // Free Google Maps link (no API call): from this stay to the airport.
+  const airportDirectionsUrl = useMemo(() => {
+    const lat = Number(listing?.latitude);
+    const lng = Number(listing?.longitude);
+    if (!listing?.airport_code || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const airport = `${listing.airport_code} airport`;
+    return `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${encodeURIComponent(airport)}`;
+  }, [listing?.airport_code, listing?.latitude, listing?.longitude]);
+
+  // Self-heal: a listing can exist without saved travel times (the lookup failed at creation, or was added
+  // before the feature). When its OWNER views it, ask for them once per browser session. The endpoint checks
+  // ownership and has its own cooldown, so this cannot be used to spend Google quota from outside.
+  useEffect(() => {
+    if (loading || !listing?.id || transportSummary || !listing.airport_code) return;
+    if (!Number.isFinite(Number(listing.latitude)) || !Number.isFinite(Number(listing.longitude))) return;
+    const listingId = listing.id;
+    const sessionKey = `flexivo.transportRefresh.${listingId}`;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (window.sessionStorage.getItem(sessionKey)) return;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session?.user?.id || session.user.id !== listing.user_id) return;
+        window.sessionStorage.setItem(sessionKey, "1");
+        const response = await fetch("/api/transport/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listingId }),
+        });
+        if (!response.ok || cancelled) return;
+        const fresh = await loadTransportSummary(listingId);
+        if (!cancelled && fresh) setTransportSummary(fresh);
+      } catch {
+        // Travel times are optional; the card already explains when they are missing.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, listing?.id, listing?.airport_code, listing?.latitude, listing?.longitude, listing?.user_id, transportSummary]);
   const galleryCommuteBadge = useMemo(() => {
     if (!airportAreaLabel) return null;
     const duration =
@@ -575,66 +630,30 @@ export default function ListingDetail() {
       media.removeEventListener("change", handleMediaChange);
     };
   }, [showMobileBookingSheet]);
-  const handleBooking = async () => {
-    if (!listing) return;
-    setBookingError(null);
-    setBookingSuccess(false);
-    if (!nightlyRange?.from || !nightlyRange?.to) {
-      setBookingError("Please select check-in and check-out dates.");
-      return;
-    }
-    if (totalGuests <= 0) {
-      setBookingError("Guest count must be at least 1.");
-      return;
-    }
-    setBookingLoading(true);
-    try {
-      const { data, error: authError } = await supabase.auth.getUser();
-      if (authError) throw authError;
-      const user = data.user;
-      if (!user) {
-        router.push(`/login?redirect=${encodeURIComponent(router.asPath)}`);
-        return;
-      }
-      const guestId = user.id;
-      const hostId = listing.user_id || null;
-      if (!hostId) {
-        setBookingError("Host information missing; cannot create booking.");
-        return;
-      }
-      const checkInDate = nightlyRange.from;
-      const checkOutDate = nightlyRange.to;
-      if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime())) {
-        setBookingError("Invalid dates selected.");
-        return;
-      }
-      if (checkOutDate <= checkInDate) {
-        setBookingError("Check-out must be after check-in.");
-        return;
-      }
-      const { error } = await supabase.from("bookings").insert({
-        listing_id: listing.id,
-        host_id: hostId,
-        guest_id: guestId,
-        status: "pending",
-        check_in_time: checkInDate.toISOString(),
-        check_out_time: checkOutDate.toISOString(),
-        guests_total: totalGuests,
-      });
-      if (error) throw error;
-      setBookingSuccess(true);
-    } catch (err: any) {
-      console.error(err);
-      setBookingError(err?.message ?? "Unable to create booking. Please try again.");
-    } finally {
-      setBookingLoading(false);
-    }
-  };
   if (loading) return <main className="p-6 text-sm text-gray-600">Loading listing…</main>;
   if (!listing) return <main className="p-6 text-red-600">Listing not found.</main>;
   return (
     <main className="min-h-screen bg-slate-50 pb-28 lg:pb-16">
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+        {showCancelledNotice && (
+          <div className="mt-2 flex items-start justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+            <p>
+              Checkout cancelled — no payment was taken. You can{" "}
+              <a href="#book" className="font-semibold text-slate-900 underline underline-offset-2">
+                try again
+              </a>{" "}
+              whenever you&apos;re ready.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowCancelledNotice(false)}
+              aria-label="Dismiss"
+              className="shrink-0 text-slate-400 hover:text-slate-600"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <header className="flex flex-wrap items-center justify-between gap-4 py-4">
           <div>
             <p className="text-xs uppercase tracking-[0.4em] text-slate-500">Stay</p>
@@ -666,7 +685,7 @@ export default function ListingDetail() {
           title={listing.title}
           commuteBadge={galleryCommuteBadge}
         />
-        <section className="mt-10 grid gap-8 lg:grid-cols-[1.3fr_0.7fr] lg:items-start">
+        <section className="mt-10 grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(340px,400px)] lg:items-start">
           <div className="space-y-12">
             <div className="space-y-10 rounded-3xl bg-white p-6 shadow-sm">
               <div className="space-y-6 border-b border-slate-100 pb-6">
@@ -719,22 +738,21 @@ export default function ListingDetail() {
               </div>
               <AirportAccessCard
                 airportCode={listing.airport_code}
-                driveMinutes={
-                  transportSummary?.taxi_typical_minutes ??
-                  transportSummary?.taxi_duration_minutes ??
-                  null
-                }
                 taxiMinutes={
                   transportSummary?.taxi_typical_minutes ??
                   transportSummary?.taxi_duration_minutes ??
                   null
                 }
+                distanceKm={transportSummary?.taxi_distance_km ?? null}
                 publicTransportMinutes={
                   transportSummary?.public_transport_typical_minutes ??
                   transportSummary?.public_transport_duration_minutes ??
                   null
                 }
                 publicTransportModes={transportSummary?.public_transport_modes ?? null}
+                publicTransportTransfers={transportSummary?.public_transport_transfers ?? null}
+                publicTransportFirstDeparture={transportSummary?.public_transport_first_departure ?? null}
+                directionsUrl={airportDirectionsUrl}
               />
               <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
                 <div>
@@ -769,7 +787,13 @@ export default function ListingDetail() {
                   </div>
                   <div>
                     <p className="font-semibold text-slate-800">Cancellation</p>
-                    <p>Flexible: full refund up to 24h before check‑in</p>
+                    <p>
+                      Free before payment. Once paid, contact{" "}
+                      <a href={`mailto:${SUPPORT_EMAIL}`} className="font-medium underline">
+                        {SUPPORT_EMAIL}
+                      </a>{" "}
+                      to cancel — requests are reviewed individually.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -833,7 +857,7 @@ export default function ListingDetail() {
 
           </div>
 
-          <aside className="hidden self-start lg:sticky lg:top-24 lg:block">
+          <aside id="book" className="hidden self-start lg:sticky lg:top-24 lg:block">
             <BookingWidget
               listingId={listing.id}
               listingTitle={listing.title}

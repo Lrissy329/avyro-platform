@@ -1,12 +1,23 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
+import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
+
+import { isMissingColumnError } from "@/lib/flexStay";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
+import { drivingLegSeconds, firstDepartureLocal } from "@/lib/transportTimes";
 
 type TransportResponse = {
   ok: boolean;
+  skipped?: "cooldown" | "fresh";
   error?: string;
-  details?: unknown;
 };
+
+// Every refresh costs several paid Google requests, so a listing is never refreshed more often than this
+// (even when forced), and an un-forced call is skipped while the saved result is still fresh.
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+const FRESH_FOR_MS = 24 * 60 * 60 * 1000;
+// "Can I get there before a 06:00 report?" -- the earliest public transport asked for from this time.
+const EARLY_DEPARTURE_HOUR = 4;
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 const DEFAULT_TIME_ZONE = "Europe/London";
@@ -158,9 +169,8 @@ const parseDrivingSummary = (route: any) => {
       distanceKm: null,
     };
   }
-  const durationMinutes = leg.duration?.value
-    ? Math.round(leg.duration.value / 60)
-    : null;
+  const seconds = drivingLegSeconds(leg);
+  const durationMinutes = seconds ? Math.round(seconds / 60) : null;
   const distanceKm = leg.distance?.value
     ? roundTo(leg.distance.value / 1000, 1)
     : null;
@@ -251,6 +261,19 @@ const getNextOffPeakTimestamp = (hour: number, timeZone: string) => {
   return Math.floor(fallback.getTime() / 1000);
 };
 
+const pickEarliestDeparture = (routes: any[]) => {
+  let best: any = null;
+  let bestAt = Number.POSITIVE_INFINITY;
+  routes.forEach((route) => {
+    const at = route?.legs?.[0]?.departure_time?.value;
+    if (Number.isFinite(at) && at < bestAt) {
+      best = route;
+      bestAt = at;
+    }
+  });
+  return best;
+};
+
 const computeTypicalAndBuffer = (day: number | null, evening: number | null) => {
   const typical = day ?? evening ?? null;
   if (typical == null) {
@@ -283,21 +306,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  const { listingId } = (req.body ?? {}) as { listingId?: string };
-  if (!listingId) {
+  const { listingId, force } = (req.body ?? {}) as { listingId?: string; force?: boolean };
+  if (!listingId || typeof listingId !== "string") {
     return res.status(400).json({ ok: false, error: "listingId is required." });
+  }
+
+  // Only the signed-in owner of a listing may refresh its travel times. This route spends money on Google
+  // and writes with the service-role client, so it must never be callable anonymously.
+  const authClient = createPagesServerClient({ req, res });
+  const {
+    data: { session },
+  } = await authClient.auth.getSession();
+  if (!session?.user?.id) {
+    return res.status(401).json({ ok: false, error: "Sign in to refresh travel times." });
   }
 
   try {
     const supabase = getSupabaseServerClient();
     const { data: listing, error: listingError } = await supabase
       .from("listings")
-      .select("id, latitude, longitude, airport_code, primary_poi_id")
+      .select("id, user_id, latitude, longitude, airport_code, primary_poi_id")
       .eq("id", listingId)
       .single();
 
     if (listingError || !listing) {
-      return res.status(404).json({ ok: false, error: listingError?.message ?? "Listing not found." });
+      return res.status(404).json({ ok: false, error: "Listing not found." });
+    }
+    if ((listing as any).user_id !== session.user.id) {
+      return res.status(403).json({ ok: false, error: "You can only refresh your own listings." });
     }
 
     const lat = Number((listing as any).latitude);
@@ -306,40 +342,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return res.status(400).json({ ok: false, error: "Listing has no coordinates." });
     }
 
-    let poiId = (listing as any).primary_poi_id as string | null;
+    // The listing's airport code is the source of truth. primary_poi_id is only a cached link, and the edit
+    // form changes airport_code without touching it, so trust the code first and repair the link.
     let poi: { id: string; latitude: number; longitude: number } | null = null;
 
-    if (!poiId && listing.airport_code) {
+    if (listing.airport_code) {
       const { data: poiRow } = await supabase
         .from("professional_pois")
         .select("id, latitude, longitude")
         .eq("type", "airport")
-        .eq("code", listing.airport_code)
-        .single();
+        .eq("code", String(listing.airport_code).trim().toUpperCase())
+        .maybeSingle();
       if (poiRow) {
-        poiId = poiRow.id;
         poi = poiRow;
-        await supabase
-          .from("listings")
-          .update({ primary_poi_id: poiId })
-          .eq("id", listingId);
+        if ((listing as any).primary_poi_id !== poiRow.id) {
+          await supabase.from("listings").update({ primary_poi_id: poiRow.id }).eq("id", listingId);
+        }
       }
     }
 
-    if (!poi && poiId) {
-      const { data: poiRow, error: poiError } = await supabase
+    if (!poi && (listing as any).primary_poi_id) {
+      const { data: poiRow } = await supabase
         .from("professional_pois")
         .select("id, latitude, longitude")
-        .eq("id", poiId)
-        .single();
-      if (poiError || !poiRow) {
-        return res.status(400).json({ ok: false, error: "Primary POI not found." });
-      }
-      poi = poiRow;
+        .eq("id", (listing as any).primary_poi_id)
+        .maybeSingle();
+      poi = poiRow ?? null;
     }
 
     if (!poi) {
-      return res.status(400).json({ ok: false, error: "No primary POI linked to this listing." });
+      return res.status(400).json({ ok: false, error: "No airport reference point for this listing." });
+    }
+
+    // Skip repeat work: never inside the cooldown, and not while a result is still fresh unless forced.
+    const { data: existing } = await supabase
+      .from("listing_transport_summaries")
+      .select("updated_at")
+      .eq("listing_id", listingId)
+      .eq("poi_id", poi.id)
+      .maybeSingle();
+    const lastUpdated = existing?.updated_at ? new Date(existing.updated_at).getTime() : null;
+    if (lastUpdated != null && Number.isFinite(lastUpdated)) {
+      const age = Date.now() - lastUpdated;
+      if (age < REFRESH_COOLDOWN_MS) return res.status(200).json({ ok: true, skipped: "cooldown" });
+      if (!force && age < FRESH_FOR_MS) return res.status(200).json({ ok: true, skipped: "fresh" });
     }
 
     const origin: [number, number] = [lng, lat];
@@ -394,6 +440,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     const departureTimes = {
       day: getNextOffPeakTimestamp(11, timeZone),
       evening: getNextOffPeakTimestamp(20, timeZone),
+      early: getNextOffPeakTimestamp(EARLY_DEPARTURE_HOUR, timeZone),
     };
 
     const fetchBestTransitForTime = async (departureTime: number) => {
@@ -417,14 +464,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return selectShortestRoute(results);
     };
 
-    const transitBestDay = await fetchBestTransitForTime(departureTimes.day);
-    const transitBestEvening = await fetchBestTransitForTime(departureTimes.evening);
-    const drivingRoutesDay = await fetchDirections(origin, drivingTarget, "driving", {
-      departureTime: departureTimes.day,
-    });
-    const drivingRoutesEvening = await fetchDirections(origin, drivingTarget, "driving", {
-      departureTime: departureTimes.evening,
-    });
+    // Earliest public transport a guest could catch from about 04:00 (crew often report before 06:00).
+    const fetchEarliestTransit = async () => {
+      const results = await Promise.all(
+        resolvedTransitTargets.map(async (target) => {
+          try {
+            const routes = await fetchDirections(origin, target.coords, "transit", {
+              transitMode: target.transitMode,
+              alternatives: true,
+              departureTime: departureTimes.early,
+            });
+            return pickEarliestDeparture(routes);
+          } catch (err) {
+            console.warn("[transport] early transit lookup failed", target.label, err);
+            return null;
+          }
+        })
+      );
+      return pickEarliestDeparture(
+        results.filter(Boolean).map((route) => route as any)
+      );
+    };
+
+    // Driving lookups must succeed (they throw on a Google error, so nothing is saved on a failed run);
+    // transit lookups are allowed to come back empty.
+    const [transitBestDay, transitBestEvening, transitEarliest, drivingRoutesDay, drivingRoutesEvening] =
+      await Promise.all([
+        fetchBestTransitForTime(departureTimes.day),
+        fetchBestTransitForTime(departureTimes.evening),
+        fetchEarliestTransit(),
+        fetchDirections(origin, drivingTarget, "driving", { departureTime: departureTimes.day }),
+        fetchDirections(origin, drivingTarget, "driving", { departureTime: departureTimes.evening }),
+      ]);
 
     const drivingRouteDay = pickShortestRoute(drivingRoutesDay);
     const drivingRouteEvening = pickShortestRoute(drivingRoutesEvening);
@@ -477,37 +548,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       drivingDaySummary.distanceKm ?? drivingEveningSummary.distanceKm ?? null;
     const taxiEstimate = estimateTaxiCost(drivingDistanceKm);
 
-    const { error: upsertError } = await supabase
-      .from("listing_transport_summaries")
-      .upsert(
-        {
-          listing_id: listingId,
-          poi_id: poi.id,
-          public_transport_duration_minutes: transitTiming.typical,
-          public_transport_typical_minutes: transitTiming.typical,
-          public_transport_buffer_minutes: transitTiming.buffer,
-          public_transport_transfers: transitMetaSummary.transfers,
-          public_transport_modes: transitMetaSummary.modes,
-          public_transport_updated_at: new Date().toISOString(),
-          taxi_duration_minutes: drivingTiming.typical,
-          taxi_typical_minutes: drivingTiming.typical,
-          taxi_buffer_minutes: drivingTiming.buffer,
-          taxi_distance_km: drivingDistanceKm,
-          taxi_cost_min: taxiEstimate.min,
-          taxi_cost_max: taxiEstimate.max,
-          taxi_updated_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "listing_id,poi_id" }
-      );
+    const nowIso = new Date().toISOString();
+    const firstDeparture = firstDepartureLocal(transitEarliest?.legs?.[0], timeZone);
+
+    // Only write what this run actually computed, so a transient failure (e.g. one transit lookup) can
+    // never blank out a good value that is already saved.
+    const payload: Record<string, unknown> = {
+      listing_id: listingId,
+      poi_id: poi.id,
+      updated_at: nowIso,
+    };
+    if (transitTiming.typical != null) {
+      payload.public_transport_duration_minutes = transitTiming.typical;
+      payload.public_transport_typical_minutes = transitTiming.typical;
+      payload.public_transport_buffer_minutes = transitTiming.buffer;
+      payload.public_transport_transfers = transitMetaSummary.transfers;
+      payload.public_transport_modes = transitMetaSummary.modes;
+      payload.public_transport_updated_at = nowIso;
+    }
+    if (drivingTiming.typical != null) {
+      payload.taxi_duration_minutes = drivingTiming.typical;
+      payload.taxi_typical_minutes = drivingTiming.typical;
+      payload.taxi_buffer_minutes = drivingTiming.buffer;
+      payload.taxi_distance_km = drivingDistanceKm;
+      payload.taxi_cost_min = taxiEstimate.min;
+      payload.taxi_cost_max = taxiEstimate.max;
+      payload.taxi_updated_at = nowIso;
+    }
+    if (firstDeparture) {
+      payload.public_transport_first_departure = firstDeparture;
+    }
+
+    const save = (row: Record<string, unknown>) =>
+      supabase.from("listing_transport_summaries").upsert(row, { onConflict: "listing_id,poi_id" });
+
+    let { error: upsertError } = await save(payload);
+    if (upsertError && isMissingColumnError(upsertError) && "public_transport_first_departure" in payload) {
+      // The first-departure column comes from a newer migration; save the rest until it is applied.
+      const { public_transport_first_departure: _omit, ...withoutNewColumn } = payload;
+      ({ error: upsertError } = await save(withoutNewColumn));
+    }
 
     if (upsertError) {
-      return res.status(500).json({ ok: false, error: upsertError.message, details: upsertError });
+      console.error("[api/transport/refresh] save failed", upsertError);
+      return res.status(500).json({ ok: false, error: "Could not save travel times." });
     }
 
     return res.status(200).json({ ok: true });
   } catch (err: any) {
     console.error("[api/transport/refresh]", err);
-    return res.status(500).json({ ok: false, error: err?.message ?? "Transport lookup failed.", details: err });
+    // Google/config errors can mention keys and project details, so the client only gets a generic message.
+    return res.status(502).json({ ok: false, error: "Travel times are temporarily unavailable." });
   }
 }

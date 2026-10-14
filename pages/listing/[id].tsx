@@ -6,9 +6,11 @@ import AvailabilityCalendarNightly from "@/components/AvailabilityCalendarNightl
 import AirportAccessCard from "@/components/listing/AirportAccessCard";
 import ListingPhotoGallery from "@/components/listing/ListingPhotoGallery";
 import MeetHostSection from "@/components/listing/MeetHostSection";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { buildReviewSummary } from "@/lib/reviews";
 import { supabase } from "@/lib/supabaseClient";
 import {
+  computeGuestTotalMajorFromHostNet,
   computePricingFromMajor,
   computeSharedPerPersonWeeklyPricePence,
   getServiceFeeRate,
@@ -23,6 +25,7 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
 } from "@heroicons/react/24/outline";
+import { StarIcon } from "@heroicons/react/24/solid";
 type DbListing = {
   id: string;
   title: string;
@@ -212,29 +215,6 @@ const REVIEW_ICON_MAP: Record<string, (typeof SparklesIcon)> = {
   Location: MapPinIcon,
   Value: CurrencyPoundIcon,
 };
-const LaurelIcon = () => (
-  <svg
-    viewBox="0 0 64 32"
-    role="presentation"
-    aria-hidden="true"
-    className="h-10 w-10 text-slate-600"
-  >
-    <path
-      d="M6 28c6-4 8-9 9-15M2 22c4-3 6-7 7-12"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      fill="none"
-    />
-    <path
-      d="M58 28c-6-4-8-9-9-15M62 22c-4-3-6-7-7-12"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      fill="none"
-    />
-  </svg>
-);
 const formatCurrency = (value: number, currency = 'GBP') => new Intl.NumberFormat('en-GB', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
 const pluralise = (value: number | null | undefined, unit: string) => {
   if (!value) return `0 ${unit}${unit.endsWith("s") ? "" : "s"}`;
@@ -251,6 +231,18 @@ const formatFullDate = (date?: Date | null) => {
 const formatShortRange = (date?: Date | null) => {
   if (!date) return "";
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+};
+const formatRelativeDate = (iso?: string | null) => {
+  if (!iso) return "Recent stay";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Recent stay";
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (days < 1) return "Today";
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
+  const years = Math.floor(months / 12);
+  return `${years} year${years === 1 ? "" : "s"} ago`;
 };
 
 export default function ListingDetail() {
@@ -535,7 +527,14 @@ export default function ListingDetail() {
       return "Check price";
     }
     if (typeof baseRate === "number" && Number.isFinite(baseRate) && baseRate > 0) {
-      return `${formatCurrency(baseRate)} / ${isHourlyListing ? "hour" : "night"}`;
+      // All-inclusive guest price, not the host's raw rate -- this is the first price a mobile
+      // guest sees, so it must already match what the booking widget/sidebar shows, not a lower
+      // number that goes up once they actually open booking.
+      const guestRate = computeGuestTotalMajorFromHostNet(baseRate, {
+        nights: 1,
+        isFirstCompletedBooking: false,
+      });
+      return `${formatCurrency(guestRate)} / ${isHourlyListing ? "hour" : "night"}`;
     }
     return "Check price";
   }, [
@@ -604,7 +603,6 @@ export default function ListingDetail() {
     [listingReviews]
   );
   const hasPublishedReviews = reviewSummary.total > 0;
-  const hostReviewFact = hasPublishedReviews ? `${reviewSummary.total} verified stay reviews` : "New host";
   const handleClearDates = () => {
     setNightlyRange({ from: null, to: null });
   };
@@ -814,36 +812,28 @@ export default function ListingDetail() {
                   ) : null}
                 </div>
 
-                {hasSelectedNightRange ? (
-                  <>
-                    <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
-                      <AvailabilityCalendarNightly
-                        listingId={listing.id}
-                        selectedRange={nightlyRange}
-                        onSelectRange={setNightlyRange}
-                        variant="inline"
-                      />
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-3 text-xs font-medium text-slate-500">
-                      <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full border border-slate-300 bg-white" />
-                        Available
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.12)]" />
-                        Booked
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.06)]" />
-                        Blocked
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                    Select dates to check availability.
-                  </div>
-                )}
+                <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70 p-3 sm:p-4">
+                  <AvailabilityCalendarNightly
+                    listingId={listing.id}
+                    selectedRange={nightlyRange}
+                    onSelectRange={setNightlyRange}
+                    variant="inline"
+                  />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-3 text-xs font-medium text-slate-500">
+                  <span className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full border border-slate-300 bg-white" />
+                    Available
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.12)]" />
+                    Booked
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[rgba(11,13,16,0.06)]" />
+                    Blocked
+                  </span>
+                </div>
               </section>
             )}
 
@@ -886,7 +876,9 @@ export default function ListingDetail() {
             hostAvatarUrl={hostAvatarUrl}
             headline={hostHeadline}
             bio={host?.bio ?? null}
-            reviewFact={hostReviewFact}
+            isVerified={host?.is_verified ?? false}
+            reviewCount={reviewSummary.total}
+            reviewOverall={reviewSummary.overall}
             airportLabel={airportAreaLabel}
           />
         </section>
@@ -926,32 +918,26 @@ export default function ListingDetail() {
             </div>
           </div>
           <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <LaurelIcon />
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500">
-                    Guest rating
-                  </p>
-                  <p className="text-3xl font-semibold text-slate-900">
-                    {hasPublishedReviews ? reviewSummary.overall.toFixed(1) : "—"}
+            <div className="flex flex-wrap items-center gap-3">
+              <StarIcon className="h-7 w-7 text-slate-900" aria-hidden="true" />
+              <p className="text-2xl font-semibold text-slate-900">
+                {hasPublishedReviews ? (
+                  <>
+                    {reviewSummary.overall.toFixed(1)}
                     <span className="text-base font-medium text-slate-500"> / 10</span>
-                  </p>
-                </div>
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">
-                  {hasPublishedReviews
-                    ? `${reviewSummary.overall.toFixed(1)}${
-                        reviewSummary.label ? ` · ${reviewSummary.label}` : ""
-                      } · ${reviewSummary.total} reviews`
-                    : "No published reviews yet"}
-                </p>
-                <p className="text-sm text-slate-500">
-                  Ratings reflect verified stays and post-trip feedback.
-                </p>
-              </div>
+                    <span className="ml-2 text-base font-medium text-slate-500">
+                      · {reviewSummary.total} review{reviewSummary.total === 1 ? "" : "s"}
+                      {reviewSummary.label ? ` · ${reviewSummary.label}` : ""}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-lg font-semibold text-slate-900">No published reviews yet</span>
+                )}
+              </p>
             </div>
+            <p className="mt-1 text-sm text-slate-500">
+              Ratings reflect verified stays and post-trip feedback.
+            </p>
             {hasPublishedReviews ? (
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 {reviewSummary.categories.map((metric) => {
@@ -983,27 +969,26 @@ export default function ListingDetail() {
                 Guest comments
               </h4>
               {publicReviewComments.length > 0 ? (
-                <div className="mt-3 space-y-3">
-                  {publicReviewComments.slice(0, 8).map((review) => (
-                    <article
-                      key={review.id}
-                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                        <span className="font-semibold text-slate-700">
-                          {review.reviewerName ?? "Guest"}
-                        </span>
-                        <span>
-                          {review.createdAt
-                            ? new Date(review.createdAt).toLocaleDateString("en-GB")
-                            : "Recent stay"}
-                          {" · "}
-                          {review.overallScore.toFixed(1)}/10
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm text-slate-700">{review.publicComment}</p>
-                    </article>
-                  ))}
+                <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                  {publicReviewComments.slice(0, 8).map((review) => {
+                    const reviewerName = review.reviewerName ?? "Guest";
+                    return (
+                      <article key={review.id} className="rounded-2xl border border-slate-200 p-4">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-9 w-9 border border-slate-200">
+                            <AvatarFallback className="bg-slate-100 text-xs font-semibold text-slate-600">
+                              {reviewerName.slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{reviewerName}</p>
+                            <p className="text-xs text-slate-500">{formatRelativeDate(review.createdAt)}</p>
+                          </div>
+                        </div>
+                        <p className="mt-3 text-sm leading-6 text-slate-700">{review.publicComment}</p>
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="mt-3 text-sm text-slate-500">

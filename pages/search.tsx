@@ -1,10 +1,12 @@
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
+import { ListIcon, MapIcon } from "lucide-react";
 
 import MapListingCard from "@/components/MapListingCardV2";
 import SearchBar from "@/components/SearchBar";
 import { SharedStayFilter } from "@/components/shared-stay/SharedStayFilter";
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import {
   computeAllInPricing,
   computeRoundedGuestPricing,
@@ -222,6 +224,8 @@ export default function SearchPage() {
   const [lastSearchBounds, setLastSearchBounds] = useState<MapBounds | null>(null);
   const [showSearchArea, setShowSearchArea] = useState(false);
   const [autoFitPins, setAutoFitPins] = useState(true);
+  // Below the lg breakpoint the map has no persistent split view, so this drives a full-screen toggle.
+  const [mobileMapOpen, setMobileMapOpen] = useState(false);
 
   // NEW: refs to enable smooth scrolling to the selected card
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -319,7 +323,7 @@ export default function SearchPage() {
       q.priceMin,
       q.priceMax,
       q.roomType,
-      q.shared_stays,
+      SHARED_STAYS_ENABLED ? q.shared_stays : null, // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
       ...(ENABLE_CREW_REST_FILTERS ? [q.quiet, q.blackout, q.access_24_7, q.commute_max] : []),
     ];
     return flags.filter((value) => {
@@ -613,7 +617,12 @@ export default function SearchPage() {
         }
         // MVP: keep public search scoped to nightly inventory.
         queryBuilder = queryBuilder.or("booking_unit.eq.nightly,booking_unit.is.null");
-        if (toBool(q.shared_stays) === true) {
+        // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+        // While off, shared listings are excluded here (null and false both stay), and a stray
+        // ?shared_stays=true is simply ignored, so old links land on normal search results.
+        if (!SHARED_STAYS_ENABLED) {
+          queryBuilder = queryBuilder.not("is_shared_stay", "is", true);
+        } else if (toBool(q.shared_stays) === true) {
           queryBuilder = queryBuilder.eq("is_shared_stay", true);
         }
 
@@ -1149,7 +1158,7 @@ export default function SearchPage() {
         onClear: () => updateQuery({ roomType: undefined }),
       });
     }
-    if (toBool(q.shared_stays) === true) {
+    if (SHARED_STAYS_ENABLED && toBool(q.shared_stays) === true) { // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
       items.push({
         key: "shared",
         label: "Shared stays",
@@ -1312,7 +1321,7 @@ export default function SearchPage() {
           screens the search is in the site header and filters move into the results column. */}
       <header className="sticky top-16 z-40 border-b border-slate-200/90 bg-white/95 backdrop-blur-md lg:hidden">
         <div className="w-full px-4 py-2.5 lg:px-5 lg:py-2">
-          <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(460px,550px)_minmax(0,1fr)] lg:items-start">
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-[minmax(620px,760px)_minmax(0,1fr)] lg:items-start">
             <div className="min-w-0 lg:hidden">
               <SearchBar
                 align="left"
@@ -1345,8 +1354,8 @@ export default function SearchPage() {
         </div>
       </header>
 
-      <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-[minmax(460px,550px)_minmax(0,1fr)]">
-        <section className="flex min-h-0 flex-col border-r border-slate-200">
+      <div className="grid flex-1 min-h-0 grid-cols-1 lg:grid-cols-[minmax(620px,760px)_minmax(0,1fr)]">
+        <section className={`min-h-0 flex-col lg:flex ${mobileMapOpen ? "hidden" : "flex"}`}>
           <div className="hidden border-b border-slate-200/80 px-5 py-3 lg:block">
             <div className="flex items-center justify-between gap-3">
               {filtersButton}
@@ -1359,7 +1368,10 @@ export default function SearchPage() {
             </div>
             {activeFilterChips ? <div className="mt-2.5">{activeFilterChips}</div> : null}
           </div>
-          <div ref={resultsRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3.5 lg:px-5 lg:py-3.5">
+          <div
+            ref={resultsRef}
+            className="grid flex-1 grid-cols-1 gap-x-4 gap-y-6 overflow-y-auto px-4 py-3.5 lg:grid-cols-2 lg:px-5 lg:py-3.5"
+          >
             {airportCode && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-[13px] text-slate-700 lg:hidden">
                 <span className="font-semibold">{listings.length}</span>{" "}
@@ -1367,7 +1379,7 @@ export default function SearchPage() {
               </div>
             )}
             {!airportCode && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 lg:col-span-2">
                 <div className="text-base font-semibold text-slate-900">Select an airport</div>
                 <p className="mt-1 text-sm text-[#4B5563]">
                   Search by hub so travel-time + availability stays accurate.
@@ -1396,7 +1408,7 @@ export default function SearchPage() {
             )}
 
             {airportCode && searchError && (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 lg:col-span-2">
                 <div className="text-base font-semibold text-rose-900">{searchError}</div>
                 <p className="mt-1 text-sm text-rose-700">
                   This isn&apos;t a lack of availability — something went wrong loading results.
@@ -1413,7 +1425,7 @@ export default function SearchPage() {
             )}
 
             {airportCode && !searchError && listings.length === 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 lg:col-span-2">
                 <div className="text-base font-semibold text-slate-900">
                   {emptyModeLabel
                     ? `No ${emptyModeLabel} listings near ${airportCode}.`
@@ -1491,8 +1503,12 @@ export default function SearchPage() {
           </div>
         </section>
 
-        <section className="relative hidden min-h-0 lg:block">
-          <div className="h-full">
+        <section
+          className={`relative min-h-0 lg:static lg:z-auto lg:block lg:p-4 ${
+            mobileMapOpen ? "fixed inset-0 z-40 bg-white" : "hidden"
+          }`}
+        >
+          <div className="relative h-full w-full lg:overflow-hidden lg:rounded-3xl lg:shadow-[0_2px_16px_rgba(15,23,42,0.08)]">
             {!airportCode ? (
               <div className="relative h-full w-full">
                 <MapView
@@ -1563,6 +1579,22 @@ export default function SearchPage() {
           </div>
         </section>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setMobileMapOpen((open) => !open)}
+        className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-slate-800 lg:hidden"
+      >
+        {mobileMapOpen ? (
+          <>
+            <ListIcon className="h-4 w-4" aria-hidden /> Show list
+          </>
+        ) : (
+          <>
+            <MapIcon className="h-4 w-4" aria-hidden /> Show map
+          </>
+        )}
+      </button>
 
       {filterOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
@@ -1749,7 +1781,10 @@ export default function SearchPage() {
                     helper: "Late arrivals and early departures.",
                   },
                 ]
-                  .filter((option) => ENABLE_CREW_REST_FILTERS || option.key === "sharedStays")
+                  // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+                  .filter((option) =>
+                    option.key === "sharedStays" ? SHARED_STAYS_ENABLED : ENABLE_CREW_REST_FILTERS
+                  )
                   .map((option) => (
                   option.key === "sharedStays" ? (
                     <SharedStayFilter

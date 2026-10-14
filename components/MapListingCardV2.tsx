@@ -3,9 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import type { LinkProps } from "next/link";
-import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { formatReviewLabel } from "@/lib/reviews";
 import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
 
 type StaySummary = { units: number; unitLabel: "night" | "hour" } | null;
@@ -214,9 +212,6 @@ const getTransportInfo = (listing: MapListing) => {
   return null;
 };
 
-const WIDE_LAYOUT_MIN_WIDTH = 820;
-const DESKTOP_VIEWPORT_MIN_WIDTH = 1024;
-
 export default function MapListingCardV2({
   listing,
   listingHref,
@@ -226,53 +221,6 @@ export default function MapListingCardV2({
   onLeave,
   onSelect,
 }: MapListingCardProps) {
-  const cardRef = useRef<HTMLElement | null>(null);
-  const [isWideLayout, setIsWideLayout] = useState(false);
-  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
-
-  useEffect(() => {
-    const node = cardRef.current;
-
-    const mediaQuery =
-      typeof window !== "undefined"
-        ? window.matchMedia(`(min-width: ${DESKTOP_VIEWPORT_MIN_WIDTH}px)`)
-        : null;
-
-    const updateLayout = () => {
-      const nextDesktopViewport = Boolean(mediaQuery?.matches);
-      setIsDesktopViewport(nextDesktopViewport);
-      setIsWideLayout((node?.clientWidth ?? 0) >= WIDE_LAYOUT_MIN_WIDTH);
-    };
-
-    updateLayout();
-
-    if (typeof mediaQuery?.addEventListener === "function") {
-      mediaQuery.addEventListener("change", updateLayout);
-    } else if (typeof mediaQuery?.addListener === "function") {
-      mediaQuery.addListener(updateLayout);
-    }
-
-    let observer: ResizeObserver | null = null;
-    if (node && typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(() => updateLayout());
-      observer.observe(node);
-    } else if (typeof window !== "undefined") {
-      window.addEventListener("resize", updateLayout);
-    }
-
-    return () => {
-      observer?.disconnect();
-      if (typeof mediaQuery?.removeEventListener === "function") {
-        mediaQuery.removeEventListener("change", updateLayout);
-      } else if (typeof mediaQuery?.removeListener === "function") {
-        mediaQuery.removeListener(updateLayout);
-      }
-      if (!observer && typeof window !== "undefined") {
-        window.removeEventListener("resize", updateLayout);
-      }
-    };
-  }, []);
-
   const bookingUnit = listing.booking_unit === "hourly" ? "hourly" : "nightly";
   const isSharedStay = Boolean(listing.isSharedStay ?? listing.isSharedBookingAllowed);
   const unitLabel = isSharedStay ? "week" : bookingUnit === "hourly" ? "hour" : "night";
@@ -324,8 +272,6 @@ export default function MapListingCardV2({
     : null;
   const showStayTotal = stayTotal != null;
 
-  const typeLabel = normaliseType(listing.type);
-
   const titleLine = buildTitle(listing);
   const factsLine = buildFacts(listing);
   const imageSrc = pickImage(listing);
@@ -333,7 +279,7 @@ export default function MapListingCardV2({
 
   const reviewOverall = toNumber(listing.review_overall ?? listing.reviewOverall);
   const reviewTotal = toNumber(listing.review_total ?? listing.reviewTotal);
-  const reviewLabel = reviewOverall != null ? formatReviewLabel(reviewOverall) : null;
+  const hasReview = reviewOverall != null && reviewTotal != null && reviewTotal > 0;
 
   const transportInfo = getTransportInfo(listing);
   const transportBadge = transportInfo?.minutes
@@ -346,7 +292,7 @@ export default function MapListingCardV2({
     ? listing.locationFallback ?? listing.location ?? ""
     : listing.location ?? listing.locationFallback ?? "";
   const showStayTotalDetails = showStayTotal && stayTotal != null;
-  // transportBadge is already shown on the photo, so it is not repeated in the text line.
+  const typeLabel = normaliseType(listing.type);
   const metadataLine = [
     typeLabel,
     isSharedStay
@@ -358,39 +304,31 @@ export default function MapListingCardV2({
     .filter((value): value is string => Boolean(value))
     .join(" · ");
   const href = listingHref ?? (listing.id ? `/listing/${listing.id}` : "#");
-  const ctaLabel = isSharedStay ? "Join shared stay →" : "View stay →";
-  const useHorizontalLayout = isWideLayout || isDesktopViewport;
 
-  const renderPrice = (compact = false) => {
+  const renderPrice = () => {
     if (guestUnitPrice == null) {
       return <div className="text-sm text-neutral-500">Price unavailable</div>;
     }
 
     const priceAmount = showStayTotalDetails && stayTotal != null ? stayTotal : guestUnitPrice;
-    const valueClass = compact
-      ? "text-[1.16rem] font-semibold tracking-tight text-neutral-900"
-      : "text-[1.45rem] font-semibold tracking-tight text-neutral-900";
-    const detailClass = compact ? "text-[11px] text-neutral-500" : "text-xs text-neutral-500";
-    const footnoteClass = compact ? "mt-1 text-[11px] text-neutral-400" : "mt-1 text-[11px] text-neutral-400";
 
     return (
-      <>
-        <div className={valueClass}>{formatCurrency(priceAmount)}</div>
+      <div>
+        <span className="text-[1.05rem] font-semibold text-neutral-900">
+          {formatCurrency(priceAmount)}
+        </span>{" "}
+        <span className="text-sm text-neutral-600">
+          {showStayTotalDetails ? "total" : isSharedStay ? "per person / week" : unitLabel}
+        </span>
         {showStayTotalDetails ? (
-          <>
-            <div className={detailClass}>
-              for {resolvedUnits} {unitLabel}
-              {resolvedUnits === 1 ? "" : "s"}
-            </div>
-            {isSharedStay ? <div className={detailClass}>per person / week</div> : null}
-          </>
-        ) : (
-          <div className={detailClass}>
-            {isSharedStay ? "per person / week" : `per ${unitLabel}`}
+          <div className="text-xs text-neutral-500">
+            for {resolvedUnits} {unitLabel}
+            {resolvedUnits === 1 ? "" : "s"}
+            {isSharedStay ? " · per person / week" : ""}
           </div>
-        )}
-        {!isSharedStay ? <div className={footnoteClass}>includes fees</div> : null}
-      </>
+        ) : null}
+        {!isSharedStay ? <div className="text-xs text-neutral-400">includes fees</div> : null}
+      </div>
     );
   };
 
@@ -403,86 +341,18 @@ export default function MapListingCardV2({
       onMouseLeave={onLeave}
       onClick={() => onSelect?.()}
     >
-      {!useHorizontalLayout ? (
-        <article
-          ref={cardRef}
-          className={`overflow-hidden rounded-[28px] border border-neutral-200 bg-white shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md ${
-            active ? "border-neutral-400 shadow-md" : ""
-          }`}
-        >
-          <div className="relative aspect-[4/3] w-full overflow-hidden bg-neutral-100">
-            <Image
-              src={imageSrc}
-              alt={listing.title ?? "Listing image"}
-              fill
-              className="object-cover"
-              sizes="100vw"
-            />
-            <span className="absolute left-4 top-4 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
-              {badgeText}
-            </span>
-          {transportBadge ? (
-            <span className="absolute bottom-4 left-4 rounded-full bg-black/55 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
-                {transportBadge}
-              </span>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-3 p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <h3 className="line-clamp-2 text-[1.05rem] font-semibold leading-6 text-neutral-900">
-                  {titleLine}
-                </h3>
-                {metadataLine ? (
-                  <div className="mt-1 line-clamp-2 text-sm text-neutral-600">{metadataLine}</div>
-                ) : locationText ? (
-                  <div className="mt-1 line-clamp-1 text-sm text-neutral-600">{locationText}</div>
-                ) : null}
-              </div>
-              <div className="shrink-0 text-right">{renderPrice(true)}</div>
-            </div>
-
-            <p className="line-clamp-2 text-sm leading-5 text-neutral-700">{summaryText}</p>
-
-            <div className="flex items-center justify-between gap-3 pt-1">
-              <div className="min-w-0 text-xs text-neutral-600">
-                {reviewOverall != null && reviewTotal != null && reviewTotal > 0 ? (
-                  <span className="inline-flex items-center gap-1">
-                    <span className="font-semibold text-neutral-900">{reviewOverall.toFixed(1)}</span>
-                    <span>· {reviewLabel ?? "Rated stay"}</span>
-                    <span>({reviewTotal})</span>
-                  </span>
-                ) : locationText ? (
-                  <span className="line-clamp-1">{locationText}</span>
-                ) : null}
-              </div>
-              <span className="shrink-0 text-sm font-medium text-neutral-800">{ctaLabel}</span>
-            </div>
-          </div>
-        </article>
-      ) : (
-      <article
-        ref={cardRef}
-        className={`grid items-stretch rounded-[24px] border border-neutral-200 bg-white shadow-sm transition duration-200 hover:-translate-y-[1px] hover:shadow-md ${
-          isWideLayout
-            ? "min-h-[182px] grid-cols-[166px_minmax(0,1fr)_118px] gap-4 p-3.5"
-            : "min-h-[162px] grid-cols-[152px_minmax(0,1fr)_118px] gap-3.5 p-3.5"
-        } ${
-          active ? "border-neutral-400 shadow-md" : ""
-        }`}
-      >
+      <article className="group">
         <div
-          className={`relative w-full overflow-hidden rounded-2xl bg-neutral-100 ${
-            isWideLayout ? "h-[150px]" : "h-full min-h-[132px]"
+          className={`relative aspect-[4/3] w-full overflow-hidden rounded-2xl bg-neutral-100 ${
+            active ? "ring-2 ring-neutral-900 ring-offset-2" : ""
           }`}
         >
           <Image
             src={imageSrc}
             alt={listing.title ?? "Listing image"}
             fill
-            className="object-cover"
-            sizes={isWideLayout ? "164px" : "148px"}
+            className="object-cover transition-transform duration-300 ease-out group-hover:scale-105"
+            sizes="(min-width: 1024px) 480px, 100vw"
           />
           <span className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
             {badgeText}
@@ -494,45 +364,30 @@ export default function MapListingCardV2({
           ) : null}
         </div>
 
-        <div className={`flex h-full min-w-0 flex-col ${isWideLayout ? "gap-2.5" : "gap-2"}`}>
+        <div className="flex flex-col gap-1.5 pt-3">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3
-                className={`line-clamp-2 font-semibold leading-tight text-neutral-900 ${
-                  isWideLayout ? "text-[1.04rem]" : "text-[1.01rem]"
-                }`}
-              >
-                {titleLine}
-              </h3>
-              <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-neutral-700">
-                {summaryText}
-              </p>
-              {metadataLine ? (
-                <div className="mt-2 line-clamp-2 text-[13px] text-neutral-600">{metadataLine}</div>
-              ) : locationText ? (
-                <div className="mt-2 line-clamp-1 text-[13px] text-neutral-600">{locationText}</div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="mt-auto flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-xs text-neutral-600">
-            {reviewOverall != null && reviewTotal != null && reviewTotal > 0 && (
-              <span className="inline-flex items-center gap-1">
-                <span className="font-semibold text-neutral-900">{reviewOverall.toFixed(1)}</span>
-                <span>· {reviewLabel ?? "Rated stay"}</span>
-                <span>({reviewTotal})</span>
+            <h3 className="line-clamp-1 text-[1.02rem] font-semibold leading-snug text-neutral-900">
+              {titleLine}
+            </h3>
+            {hasReview ? (
+              <span className="flex shrink-0 items-center gap-1 pt-0.5 text-sm text-neutral-800">
+                <span aria-hidden>★</span>
+                <span className="font-semibold">{reviewOverall!.toFixed(1)}</span>
               </span>
-            )}
-            <span className="text-sm font-medium text-neutral-800">{ctaLabel}</span>
+            ) : null}
           </div>
-        </div>
 
-        <div className="flex flex-col justify-start border-l border-neutral-100/80 pl-3 pt-1 text-right">
-          {renderPrice(useHorizontalLayout && !isWideLayout)}
-        </div>
+          {metadataLine ? (
+            <div className="line-clamp-1 text-sm text-neutral-500">{metadataLine}</div>
+          ) : locationText ? (
+            <div className="line-clamp-1 text-sm text-neutral-500">{locationText}</div>
+          ) : null}
 
+          <p className="line-clamp-2 text-sm leading-5 text-neutral-600">{summaryText}</p>
+
+          <div className="mt-0.5">{renderPrice()}</div>
+        </div>
       </article>
-      )}
     </Link>
   );
 }

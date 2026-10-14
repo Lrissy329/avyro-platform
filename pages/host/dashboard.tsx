@@ -12,6 +12,7 @@ import { isPaidFinalBookingStatus } from "@/lib/bookingStatus";
 import { evaluateListingReadiness, type ListingReadiness } from "@/lib/listingReadiness";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 import { getHostStripeReadiness } from "@/lib/hostStripeReadiness";
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 
 const HostEarningsChart = dynamic(
   () => import("@/components/host/HostEarningsChart").then((mod) => mod.HostEarningsChart),
@@ -78,6 +79,9 @@ type SummaryMetrics = {
   releasedPayoutCount: number;
   lastPayoutAmountPence: number | null;
   lastPayoutDate: string | null;
+  // Count of otherwise-final bookings with no usable host_net_total_pence, so the UI can say so
+  // rather than quietly showing a total that excludes them with no explanation.
+  revenueDataGapCount: number;
 };
 
 type UpcomingStay = {
@@ -115,17 +119,22 @@ const getBookingStart = (booking: BookingRow) =>
 const getBookingEnd = (booking: BookingRow) =>
   parseDateValue(booking.check_out_time ?? booking.check_out ?? null);
 
+// host_net_total_pence is the only field on a booking that represents what the HOST actually
+// nets — guest_total_pence and price_total are guest-paid amounts and already include the
+// platform fee. A booking missing host_net_total_pence used to fall back to those guest-paid
+// figures, which silently overstated a host's own revenue by the commission amount. There is no
+// reliable way to derive host net from a guest total after the fact (the fee solver only runs
+// forward, host net -> guest total — see lib/pricing.ts), so a booking without real host-net data
+// now contributes 0 rather than a guessed, inflated number. hasHostNetPence lets callers detect
+// and surface that gap instead of it passing silently.
 const getHostNetPence = (booking: BookingRow) => {
   const hostNet = Number(booking.host_net_total_pence ?? NaN);
-  if (Number.isFinite(hostNet) && hostNet > 0) return Math.round(hostNet);
+  return Number.isFinite(hostNet) && hostNet >= 0 ? Math.round(hostNet) : 0;
+};
 
-  const guestTotal = Number(booking.guest_total_pence ?? NaN);
-  if (Number.isFinite(guestTotal) && guestTotal > 0) return Math.round(guestTotal);
-
-  const totalMajor = Number(booking.price_total ?? NaN);
-  if (Number.isFinite(totalMajor) && totalMajor > 0) return Math.round(totalMajor * 100);
-
-  return 0;
+const hasHostNetPence = (booking: BookingRow) => {
+  const hostNet = Number(booking.host_net_total_pence ?? NaN);
+  return Number.isFinite(hostNet) && hostNet >= 0;
 };
 
 const formatCurrencyFromPence = (amountPence?: number | null, currency = "GBP") => {
@@ -296,6 +305,13 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
   }, {});
 
   const finalBookings = bookings.filter((booking) => isPaidFinalBookingStatus(booking.status));
+  const finalBookingsMissingHostNet = finalBookings.filter((booking) => !hasHostNetPence(booking));
+  if (finalBookingsMissingHostNet.length > 0) {
+    console.error(
+      "[host dashboard] booking(s) missing host_net_total_pence — excluded from revenue totals instead of guessing from guest-paid amounts",
+      finalBookingsMissingHostNet.map((booking) => booking.id)
+    );
+  }
   const pendingBookingStatuses = new Set(["awaiting_payment", "pending_payment", "approved", "payment_failed"]);
   const pendingBookings = bookings.filter((booking) =>
     pendingBookingStatuses.has(String(booking.status ?? "").toLowerCase())
@@ -447,6 +463,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (ctx) => 
     releasedPayoutCount: releasedPayouts.length,
     lastPayoutAmountPence: lastPayout ? getHostNetPence(lastPayout) : null,
     lastPayoutDate: lastPayout?.payout_released_at ?? null,
+    revenueDataGapCount: finalBookingsMissingHostNet.length,
   };
 
   return {
@@ -485,11 +502,14 @@ export default function HostDashboardPage({
   const newestSharedCreatedAt = newestSharedListing?.created_at
     ? new Date(newestSharedListing.created_at).getTime()
     : null;
+  // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+  // The Shared Stay promo card is only shown while the feature is on.
   const shouldShowSharedConfidenceCard =
-    sharedListings.length === 0 ||
+    SHARED_STAYS_ENABLED &&
+    (sharedListings.length === 0 ||
     (sharedListings.length === 1 &&
       newestSharedCreatedAt != null &&
-      Date.now() - newestSharedCreatedAt <= 14 * 24 * 60 * 60 * 1000);
+      Date.now() - newestSharedCreatedAt <= 14 * 24 * 60 * 60 * 1000));
 
   const stripeConnected = stripe.ready;
   const stripeLabel = stripeConnected
@@ -528,7 +548,7 @@ export default function HostDashboardPage({
 
   return (
     <HostShellLayout title="Hosting insights" activeNav="dashboard">
-      <div className="space-y-8">
+      <div className="space-y-6">
         <HostPageHeader
           title="Hosting insights"
           description="Live view of bookings, occupancy, booked revenue and payout progress."
@@ -551,19 +571,19 @@ export default function HostDashboardPage({
         />
 
         {onboardingReturn ? (
-          <Card className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800">
+          <Card className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-800">
             {stripeConnected
               ? "Stripe setup complete — you're ready to receive payouts."
               : "Thanks for completing Stripe's form. We're confirming your account now — this can take a few minutes. Refresh this page to check again."}
           </Card>
         ) : onboardingRefresh ? (
-          <Card className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-800">
+          <Card className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-800">
             Your Stripe setup link expired before you finished. Reconnect Stripe below to try again.
           </Card>
         ) : null}
 
         <Card
-          className={`rounded-2xl border p-5 shadow-sm ${
+          className={`rounded-lg border p-4 ${
             readyListings.length > 0
               ? "border-emerald-200 bg-emerald-50/70"
               : "border-amber-200 bg-amber-50/70"
@@ -597,7 +617,9 @@ export default function HostDashboardPage({
           ) : (
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-amber-800">Your listing is created</p>
+                <p className="text-sm font-semibold text-amber-800">
+                  {listings.length === 0 ? "No listings yet" : "Your listing is created"}
+                </p>
                 {primaryListingIssue ? (
                   <p className="mt-1 text-sm text-amber-700">{primaryListingIssue}</p>
                 ) : (
@@ -612,61 +634,68 @@ export default function HostDashboardPage({
                 )}
               </div>
               <Link
-                href="/host/listings"
+                href={listings.length === 0 ? "/host/create-listing" : "/host/listings"}
                 className="rounded-xl border border-current/15 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
               >
-                Review listing readiness
+                {listings.length === 0 ? "Create a listing" : "Review listing readiness"}
               </Link>
             </div>
           )}
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card className="col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Card className="col-span-2 rounded-lg border border-slate-200 bg-white p-5">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm text-slate-500">Booked host revenue</p>
-                <p className="mt-2 text-3xl font-semibold text-slate-900">
+                <p className="text-[13px] text-slate-500">Booked host revenue</p>
+                <p className="mt-1.5 text-2xl font-semibold text-slate-900 tabular-nums">
                   {formatCurrencyCompact(summary.totalBookedRevenuePence)}
                 </p>
               </div>
-              <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              <Badge className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
                 {buildDeltaLabel(summary.currentMonthBookedDeltaPct)}
               </Badge>
             </div>
-            <p className="mt-3 text-sm text-slate-600">
+            <p className="mt-2.5 text-[13px] text-slate-500">
               Net booked revenue from confirmed and paid stays across your Flexivo listings.
             </p>
+            {summary.revenueDataGapCount > 0 ? (
+              <p className="mt-2 text-xs text-amber-600">
+                {summary.revenueDataGapCount} paid booking
+                {summary.revenueDataGapCount === 1 ? "" : "s"} missing pricing data and excluded
+                from this total — contact support to have {summary.revenueDataGapCount === 1 ? "it" : "them"} reviewed.
+              </p>
+            ) : null}
           </Card>
 
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-slate-500">This month&apos;s occupancy</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">
+          <Card className="rounded-lg border border-slate-200 bg-white p-5">
+            <p className="text-[13px] text-slate-500">This month&apos;s occupancy</p>
+            <p className="mt-1.5 text-xl font-semibold text-slate-900 tabular-nums">
               {summary.occupancyThisMonth != null ? `${(summary.occupancyThisMonth * 100).toFixed(0)}%` : "—"}
             </p>
-            <p className="mt-1 text-sm text-slate-600">{buildDeltaLabel(summary.occupancyDeltaPct)}</p>
+            <p className="mt-1 text-[13px] text-slate-500">{buildDeltaLabel(summary.occupancyDeltaPct)}</p>
           </Card>
 
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-slate-500">Upcoming check-ins</p>
-            <p className="mt-2 text-2xl font-semibold text-slate-900">{summary.upcomingCheckIns}</p>
-            <p className="mt-1 text-sm text-slate-600">Next 7 days</p>
+          <Card className="rounded-lg border border-slate-200 bg-white p-5">
+            <p className="text-[13px] text-slate-500">Upcoming check-ins</p>
+            <p className="mt-1.5 text-xl font-semibold text-slate-900 tabular-nums">{summary.upcomingCheckIns}</p>
+            <p className="mt-1 text-[13px] text-slate-500">Next 7 days</p>
           </Card>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <Card className="rounded-lg border border-slate-200 bg-white p-5">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm text-slate-500">Booking trend</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">
+                <p className="text-[13px] text-slate-500">Booking trend</p>
+                <p className="mt-1.5 text-xl font-semibold text-slate-900 tabular-nums">
                   {formatCurrencyCompact(summary.bookedThisMonthPence)}
-                  <span className="ml-2 align-middle text-sm font-normal text-slate-500">
+                  <span className="ml-2 align-middle text-[13px] font-normal text-slate-500">
                     booked this month
                   </span>
                 </p>
               </div>
-              <span className="rounded-xl border border-slate-300 bg-white px-3 py-1 text-xs text-slate-800">
+              <span className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-800">
                 Last 6 months
               </span>
             </div>
@@ -674,28 +703,32 @@ export default function HostDashboardPage({
             <div className="mt-4 h-56">
               <HostEarningsChart data={earningsData} />
             </div>
-            <p className="mt-4 text-xs text-slate-500">
+            <p className="mt-3 text-xs text-slate-500">
               Solid line shows booked net revenue. Dotted line tracks bookings still in flight.
             </p>
           </Card>
 
-          <div className="space-y-4">
-            <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="space-y-3">
+            <Card className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-slate-500">Payout account</p>
-                  <p className="mt-2 text-xl font-semibold text-slate-900">Stripe Express</p>
+                  <p className="text-[13px] text-slate-500">Payout account</p>
+                  <p className="mt-1.5 text-base font-semibold text-slate-900">Stripe Express</p>
                 </div>
-                <Badge className={`rounded-full border px-3 py-1 text-xs font-semibold ${stripeBadgeClass}`}>
+                <Badge className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${stripeBadgeClass}`}>
                   {stripeLabel}
                 </Badge>
               </div>
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-5">
-                <p className="text-[11px] uppercase tracking-wider text-slate-500">Account</p>
-                <p className="mt-3 text-xl font-semibold text-slate-900 font-mono tabular-nums">
-                  {trimStripeAccountId(stripe.accountId)}
-                </p>
-                <p className="mt-2 text-xs text-slate-500">
+              <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3.5 py-3.5">
+                <p className="text-[11px] text-slate-500">Account</p>
+                {stripe.accountId ? (
+                  <p className="mt-1.5 text-base font-semibold text-slate-900 font-mono tabular-nums">
+                    {trimStripeAccountId(stripe.accountId)}
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-sm text-slate-600">Connect Stripe to receive payouts.</p>
+                )}
+                <p className="mt-1.5 text-xs text-slate-500">
                   {summary.lastPayoutDate
                     ? `Last payout: ${formatCurrencyFromPence(summary.lastPayoutAmountPence)} · ${formatDate(summary.lastPayoutDate)}`
                     : summary.awaitingPayoutCount > 0
@@ -703,94 +736,89 @@ export default function HostDashboardPage({
                     : "No payout activity yet."}
                 </p>
               </div>
-              <p className="mt-4 text-xs text-slate-500">
+              <p className="mt-3 text-xs text-slate-500">
                 {stripeConnected
                   ? "Your connected Stripe account is ready for upcoming transfers."
                   : "Finish Stripe setup to keep payouts moving without delays."}
               </p>
             </Card>
 
-            <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <Card className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-sm text-slate-500">Next arrivals</p>
-                  <p className="mt-1 text-sm text-slate-600">
+                  <p className="text-[13px] text-slate-500">Next arrivals</p>
+                  <p className="mt-1 text-xs text-slate-500">
                     Upcoming stays that need the space ready.
                   </p>
                 </div>
                 <Link
                   href="/host/guests"
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-1 text-xs text-slate-800 hover:bg-slate-50"
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-800 hover:bg-slate-50"
                 >
                   View all
                 </Link>
               </div>
 
-              <div className="mt-4 space-y-3">
+              <div className="mt-3 divide-y divide-slate-100">
                 {upcomingStays.length ? (
                   upcomingStays.map((stay) => (
                     <Link
                       key={stay.id}
                       href={`/host/bookings/${stay.id}`}
-                      className="block rounded-xl border border-slate-200 bg-white px-4 py-3 transition hover:border-slate-300 hover:bg-slate-50"
+                      className="block px-1 py-2.5 transition hover:bg-slate-50"
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">{stay.listingTitle}</p>
-                          <p className="mt-1 text-xs text-slate-500">
+                          <p className="text-sm font-medium text-slate-900">{stay.listingTitle}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">
                             {formatDateLong(stay.checkIn)}{stay.checkOut ? ` → ${formatDateLong(stay.checkOut)}` : ""}
                           </p>
                         </div>
-                        <span className="text-sm font-semibold text-slate-900">
+                        <span className="text-sm font-semibold text-slate-900 tabular-nums">
                           {formatCurrencyFromPence(stay.hostNetPence)}
                         </span>
                       </div>
                     </Link>
                   ))
                 ) : (
-                  <p className="text-sm text-slate-500">No confirmed check-ins in the next 7 days.</p>
+                  <p className="py-2.5 text-[13px] text-slate-500">No confirmed check-ins in the next 7 days.</p>
                 )}
               </div>
             </Card>
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-slate-500">Booked this month</p>
-            <p className="mt-2 text-xl font-semibold text-slate-900 font-mono tabular-nums">
-              {formatCurrencyCompact(summary.bookedThisMonthPence)}
+        <div className="grid gap-3 md:grid-cols-2">
+          <Card className="rounded-lg border border-slate-200 bg-white p-5">
+            <p className="text-[13px] text-slate-500">Live listings</p>
+            <p className="mt-1.5 text-xl font-semibold text-slate-900 tabular-nums">
+              {readyListings.length}
+              <span className="ml-1.5 align-middle text-[13px] font-normal text-slate-500">
+                of {summary.activeListings} total
+              </span>
             </p>
-            <p className="mt-1 text-sm text-slate-600">
-              New booked net revenue created this month.
-            </p>
-          </Card>
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-slate-500">Active listings</p>
-            <p className="mt-2 text-xl font-semibold text-slate-900 font-mono tabular-nums">
-              {summary.activeListings}
-            </p>
-            <p className="mt-1 text-sm text-slate-600">
-              Listings currently managed from your host account.
+            <p className="mt-1 text-[13px] text-slate-500">
+              Search-ready and bookable right now.
             </p>
           </Card>
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-slate-500">Pending actions</p>
-            <p className="mt-2 text-xl font-semibold text-slate-900 font-mono tabular-nums">
+          <Card className="rounded-lg border border-slate-200 bg-white p-5">
+            <p className="text-[13px] text-slate-500">Pending actions</p>
+            <p className="mt-1.5 text-xl font-semibold text-slate-900 tabular-nums">
               {summary.pendingActions}
             </p>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-[13px] text-slate-500">
               Awaiting payment, payout follow-up, or Stripe setup tasks.
             </p>
           </Card>
         </div>
 
+        {/* SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md */}
         {shouldShowSharedConfidenceCard ? (
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <Card className="rounded-lg border border-slate-200 bg-white p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-2xl">
                 <p className="text-sm font-semibold text-slate-900">Shared Stay for airport professionals</p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
+                <p className="mt-2 text-[13px] leading-6 text-slate-500">
                   Shared Stay helps professionals coordinate accommodation near airports. The first
                   guest secures the stay, then other professionals can continue joining until the
                   available spots are filled.
@@ -799,25 +827,25 @@ export default function HostDashboardPage({
               <button
                 type="button"
                 onClick={() => setShowSharedStayGuide((current) => !current)}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                className="rounded-md border border-slate-300 bg-white px-3.5 py-1.5 text-[13px] font-medium text-slate-800 hover:bg-slate-50"
               >
                 {showSharedStayGuide ? "Hide Shared Stay guide" : "Learn how Shared Stay works"}
               </button>
             </div>
 
             {showSharedStayGuide ? (
-              <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-3.5">
                   <p className="text-sm font-semibold text-slate-900">How occupancy works</p>
-                  <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                  <div className="mt-2 space-y-2 text-[13px] leading-6 text-slate-500">
                     <p>Professionals book individual spots in the property.</p>
                     <p>Joining an existing stay matters because it keeps demand concentrated in one live weekly stay.</p>
                     <p>Once a shared stay begins, the property dates are reserved for that stay while more professionals continue joining.</p>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="rounded-md border border-slate-200 bg-white p-3.5">
                   <p className="text-sm font-semibold text-slate-900">Why hosts use it</p>
-                  <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+                  <ul className="mt-2 space-y-2 text-[13px] leading-6 text-slate-500">
                     <li>Longer weekly stays can reduce vacancy gaps.</li>
                     <li>Pricing stays simple with one weekly property rate.</li>
                     <li>Designed for crew, trainees, contractors, and airport professionals.</li>
@@ -830,62 +858,56 @@ export default function HostDashboardPage({
         ) : null}
 
         <div>
-          <Card className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <Card className="rounded-lg border border-slate-200 bg-white p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-slate-500">Pricing</p>
-                <p className="mt-1 text-sm text-slate-600">
+                <p className="text-[13px] text-slate-500">Pricing</p>
+                <p className="mt-1 text-xs text-slate-500">
                   Update base rates without touching the calendar.
                 </p>
               </div>
               <Link
                 href="/host/create-listing"
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-800 hover:bg-slate-50"
+                className="rounded-md border border-slate-300 bg-white px-3.5 py-1.5 text-[13px] text-slate-800 hover:bg-slate-50"
               >
                 New listing
               </Link>
             </div>
 
-            <div className="mt-4">
+            <div className="mt-3">
               {listings.length ? (
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="divide-y divide-slate-100">
                   {listingReadiness.slice(0, 6).map(({ listing, readiness }) => (
                     <Link
                       key={listing.id}
                       href={`/host/listings/${listing.id}/pricing`}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      className="flex items-center justify-between gap-3 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-slate-900">
-                            {listing.title ?? "Untitled listing"}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {readiness.status === "search_ready"
-                              ? "Search Ready"
-                              : readiness.reasons[0] ?? "Needs action"}
-                          </p>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                            {listing.booking_unit === "hourly" ? "Hourly" : "Nightly"}
-                          </span>
-                          <Badge
-                            className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${readinessBadgeClass[readiness.status]}`}
-                          >
-                            {readiness.status === "search_ready"
-                              ? "Search Ready"
-                              : readiness.status === "draft"
-                              ? "Draft"
-                              : "Needs Action"}
-                          </Badge>
-                        </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-slate-900">
+                          {listing.title ?? "Untitled listing"}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {listing.booking_unit === "hourly" ? "Hourly" : "Nightly"} ·{" "}
+                          {readiness.status === "search_ready"
+                            ? "Search Ready"
+                            : readiness.reasons[0] ?? "Needs action"}
+                        </p>
                       </div>
+                      <Badge
+                        className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${readinessBadgeClass[readiness.status]}`}
+                      >
+                        {readiness.status === "search_ready"
+                          ? "Search Ready"
+                          : readiness.status === "draft"
+                          ? "Draft"
+                          : "Needs Action"}
+                      </Badge>
                     </Link>
                   ))}
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">
+                <p className="text-[13px] text-slate-500">
                   No listings yet. Create one to set pricing.
                 </p>
               )}

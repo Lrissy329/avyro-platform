@@ -74,19 +74,6 @@ export default function MeetHostSection({
               </div>
             </div>
           </div>
-
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled
-              className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white opacity-60"
-            >
-              Message host
-            </button>
-            <p className="text-sm text-slate-500">
-              Questions before booking? Message the host before you reserve.
-            </p>
-          </div>
         </div>
       </div>
     </section>

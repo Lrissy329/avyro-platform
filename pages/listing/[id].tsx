@@ -6,7 +6,6 @@ import AvailabilityCalendarNightly from "@/components/AvailabilityCalendarNightl
 import AirportAccessCard from "@/components/listing/AirportAccessCard";
 import ListingPhotoGallery from "@/components/listing/ListingPhotoGallery";
 import MeetHostSection from "@/components/listing/MeetHostSection";
-import ProfileTrustCard from "@/components/listing/ProfileTrustCard";
 import { buildReviewSummary } from "@/lib/reviews";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -517,7 +516,6 @@ export default function ListingDetail() {
     host?.headline?.trim() ||
     (airportAreaLabel ? `Professional host near ${airportAreaLabel}` : "Professional-ready stay host");
   const hostAvatarUrl = host?.avatar_url ? toPublicUrl(host.avatar_url) ?? host.avatar_url : null;
-  const hostSummaryText = "Professional-ready accommodation for airport-area travellers.";
   const mobileBookingBarLabel = useMemo(() => {
     if (listing?.is_shared_stay) return "Join shared stay";
     if (listing?.allow_flexible_stays && listingFlexibleMode !== "none") return "Book with flexibility";
@@ -708,20 +706,6 @@ export default function ListingDetail() {
                     Professional-ready accommodation with straightforward airport access and practical comforts.
                   </p>
                 </div>
-                <ProfileTrustCard
-                  compact
-                  name={hostName}
-                  avatarUrl={hostAvatarUrl}
-                  eyebrow="Hosted by"
-                  title={`Hosted by ${hostName}`}
-                  subtitle={hostHeadline}
-                  supportingText={hostSummaryText}
-                  trustBadges={[
-                    { type: "flexivo_host" },
-                    ...(airportAreaLabel ? [{ type: "airport_local" as const, label: `Near ${airportAreaLabel}` }] : []),
-                  ]}
-                  className="bg-slate-50/90"
-                />
               </div>
               <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
                 <div>
@@ -968,30 +952,32 @@ export default function ListingDetail() {
                 </p>
               </div>
             </div>
-            <div className="mt-6 grid gap-4 sm:grid-cols-2">
-              {reviewSummary.categories.map((metric) => {
-                const IconComponent = REVIEW_ICON_MAP[metric.label];
-                return (
-                  <div key={metric.label}>
-                    <div className="flex items-center justify-between text-sm text-slate-600">
-                      <div className="flex items-center gap-2 font-semibold text-slate-900">
-                        {IconComponent && (
-                          <IconComponent className="h-4 w-4 text-slate-400" aria-hidden="true" />
-                        )}
-                        <span>{metric.label}</span>
+            {hasPublishedReviews ? (
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                {reviewSummary.categories.map((metric) => {
+                  const IconComponent = REVIEW_ICON_MAP[metric.label];
+                  return (
+                    <div key={metric.label}>
+                      <div className="flex items-center justify-between text-sm text-slate-600">
+                        <div className="flex items-center gap-2 font-semibold text-slate-900">
+                          {IconComponent && (
+                            <IconComponent className="h-4 w-4 text-slate-400" aria-hidden="true" />
+                          )}
+                          <span>{metric.label}</span>
+                        </div>
+                        <p className="font-semibold">{metric.score.toFixed(1)}</p>
                       </div>
-                      <p className="font-semibold">{metric.score.toFixed(1)}</p>
+                      <div className="mt-2 h-1.5 rounded-full bg-slate-100">
+                        <div
+                          className="h-full rounded-full bg-slate-900"
+                          style={{ width: `${(metric.score / 10) * 100}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="mt-2 h-1.5 rounded-full bg-slate-100">
-                      <div
-                        className="h-full rounded-full bg-slate-900"
-                        style={{ width: `${(metric.score / 10) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            ) : null}
             <div className="mt-8">
               <h4 className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">
                 Guest comments
@@ -1029,7 +1015,7 @@ export default function ListingDetail() {
         </section>
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
           <button className="underline-offset-4 hover:underline">Report this listing</button>
-          <p>&copy; {new Date().getFullYear()} Veloro — inspired by Airbnb excellence</p>
+          <p>&copy; {new Date().getFullYear()} Flexivo</p>
         </footer>
       </div>
       <div

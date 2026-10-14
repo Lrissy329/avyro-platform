@@ -186,8 +186,8 @@ export default function BookingSuccessPage() {
     const end = new Date(booking.check_out);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     const endExclusive = addDays(end, 1);
-    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Veloro stay";
-    const details = `Veloro booking ${booking.id}`;
+    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Flexivo stay";
+    const details = `Flexivo booking ${booking.id}`;
     const location = booking.listing?.location ?? "";
     const url = new URL("https://calendar.google.com/calendar/render");
     url.searchParams.set("action", "TEMPLATE");
@@ -204,22 +204,22 @@ export default function BookingSuccessPage() {
     const end = new Date(booking.check_out);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
     const endExclusive = addDays(end, 1);
-    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Veloro stay";
-    const location = booking.listing?.location ?? "Veloro stay";
+    const summary = booking.listing?.title ? `Stay at ${booking.listing.title}` : "Flexivo stay";
+    const location = booking.listing?.location ?? "Flexivo stay";
     const now = new Date();
     const ics = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Veloro//Booking//EN",
+      "PRODID:-//Flexivo//Booking//EN",
       "CALSCALE:GREGORIAN",
       "BEGIN:VEVENT",
-      `UID:booking-${booking.id}@veloro`,
+      `UID:booking-${booking.id}@flexivo`,
       `DTSTAMP:${now.toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
       `DTSTART;VALUE=DATE:${toGoogleDate(start)}`,
       `DTEND;VALUE=DATE:${toGoogleDate(endExclusive)}`,
       `SUMMARY:${escapeICS(summary)}`,
       `LOCATION:${escapeICS(location)}`,
-      `DESCRIPTION:${escapeICS(`Booking ${booking.id} via Veloro`)}`,
+      `DESCRIPTION:${escapeICS(`Booking ${booking.id} via Flexivo`)}`,
       "END:VEVENT",
       "END:VCALENDAR",
     ].join("\r\n");
@@ -228,7 +228,7 @@ export default function BookingSuccessPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `veloro-booking-${booking?.id}.ics`;
+    link.download = `flexivo-booking-${booking?.id}.ics`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -349,7 +349,7 @@ export default function BookingSuccessPage() {
             )}
             <p className="mt-4 text-sm text-gray-600">
               {isPaidConfirmed
-                ? "Thanks for booking with Veloro! We've reserved your stay and notified the host. You'll receive email confirmation shortly."
+                ? "Thanks for booking with Flexivo! We've reserved your stay and notified the host. You'll receive email confirmation shortly."
                 : isPaymentFailed
                 ? `No payment was taken. If you'd like help completing this booking, contact ${SUPPORT_EMAIL}.`
                 : "We're confirming your payment with Stripe. This usually takes a few seconds — this page will update automatically."}
@@ -381,7 +381,7 @@ export default function BookingSuccessPage() {
                   <p className="text-sm uppercase tracking-[0.3em] text-white/70">
                     Booking confirmed
                   </p>
-                  <h2 className="text-2xl font-semibold">{booking.listing?.title ?? "Veloro stay"}</h2>
+                  <h2 className="text-2xl font-semibold">{booking.listing?.title ?? "Flexivo stay"}</h2>
                   {booking.listing?.location && (
                     <p className="text-white/80">{booking.listing.location}</p>
                   )}

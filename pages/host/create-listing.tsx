@@ -1388,7 +1388,7 @@ export default function CreateListing() {
             <section className="w-full">
               <h2 className="text-2xl font-medium mb-3 text-center">Tell guests what your place has to offer</h2>
 <p className="mb-8 text-center text-gray-600">
-  Select every amenity this listing includes. Core Veloro amenities are highlighted first.
+  Select every amenity this listing includes. Core Flexivo amenities are highlighted first.
 </p>
 {rentalTypeConfig.amenityExclusions.length > 0 && (
   <p className="mb-6 text-center text-xs text-gray-500">

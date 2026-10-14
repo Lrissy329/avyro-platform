@@ -1429,7 +1429,7 @@ export default function SearchPage() {
                 <div className="text-base font-semibold text-slate-900">
                   {emptyModeLabel
                     ? `No ${emptyModeLabel} listings near ${airportCode}.`
-                    : `No Veloro stays match your filters near ${airportCode}.`}
+                    : `No Flexivo stays match your filters near ${airportCode}.`}
                 </div>
                 <p className="mt-1 text-sm text-[#4B5563]">
                   {emptyModeLabel

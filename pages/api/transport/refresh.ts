@@ -574,6 +574,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       payload.taxi_cost_min = taxiEstimate.min;
       payload.taxi_cost_max = taxiEstimate.max;
       payload.taxi_updated_at = nowIso;
+      // Already present on the route object from the driving Directions call above -- no extra
+      // API request. Falls back to the evening route if the day one has no geometry for some reason.
+      const routePolyline =
+        drivingRouteDay?.overview_polyline?.points ?? drivingRouteEvening?.overview_polyline?.points ?? null;
+      if (typeof routePolyline === "string" && routePolyline.length > 0) {
+        payload.driving_route_polyline = routePolyline;
+      }
     }
     if (firstDeparture) {
       payload.public_transport_first_departure = firstDeparture;
@@ -587,6 +594,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       // The first-departure column comes from a newer migration; save the rest until it is applied.
       const { public_transport_first_departure: _omit, ...withoutNewColumn } = payload;
       ({ error: upsertError } = await save(withoutNewColumn));
+    }
+    if (upsertError && isMissingColumnError(upsertError) && "driving_route_polyline" in payload) {
+      // Same schema-drift tolerance for the route-geometry column, also from a newer migration.
+      const { driving_route_polyline: _omitPolyline, ...withoutPolyline } = payload;
+      ({ error: upsertError } = await save(withoutPolyline));
     }
 
     if (upsertError) {

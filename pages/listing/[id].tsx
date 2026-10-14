@@ -18,6 +18,7 @@ import {
 import { mapAmenities } from "@/lib/amenities";
 import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import { SUPPORT_EMAIL } from "@/lib/support";
+import { decodePolyline } from "@/lib/transportTimes";
 import {
   ChatBubbleLeftRightIcon,
   CurrencyPoundIcon,
@@ -81,6 +82,7 @@ type TransportSummary = {
   taxi_distance_km: number | null;
   taxi_cost_min: number | null;
   taxi_cost_max: number | null;
+  driving_route_polyline?: string | null;
 };
 type HostProfile = {
   full_name: string | null;
@@ -118,8 +120,9 @@ type ListingReviewsApiResponse = {
 const TRANSPORT_COLUMNS =
   "public_transport_duration_minutes, public_transport_typical_minutes, public_transport_buffer_minutes, public_transport_transfers, public_transport_modes, taxi_duration_minutes, taxi_typical_minutes, taxi_buffer_minutes, taxi_distance_km, taxi_cost_min, taxi_cost_max";
 
-// Saved airport travel times for a listing. public_transport_first_departure comes from a newer migration,
-// so if selecting it fails the lookup is retried without it.
+// Saved airport travel times for a listing. public_transport_first_departure and
+// driving_route_polyline each come from their own newer migration, so selecting either is
+// retried without it on failure, oldest-safe-subset last.
 const loadTransportSummary = async (
   listingId: string,
   poiId?: string | null
@@ -130,8 +133,11 @@ const loadTransportSummary = async (
     return query.order("updated_at", { ascending: false }).limit(1).maybeSingle();
   };
   let result: { data: unknown; error: unknown } = await run(
-    `${TRANSPORT_COLUMNS}, public_transport_first_departure`
+    `${TRANSPORT_COLUMNS}, public_transport_first_departure, driving_route_polyline`
   );
+  if (result.error) {
+    result = await run(`${TRANSPORT_COLUMNS}, public_transport_first_departure`);
+  }
   if (result.error) result = await run(TRANSPORT_COLUMNS);
   return (result.data as TransportSummary) ?? null;
 };
@@ -462,6 +468,19 @@ export default function ListingDetail() {
     const airport = `${listing.airport_code} airport`;
     return `https://www.google.com/maps/dir/?api=1&origin=${lat},${lng}&destination=${encodeURIComponent(airport)}`;
   }, [listing?.airport_code, listing?.latitude, listing?.longitude]);
+  // Decoded once from the stored route (no API call -- see driving_route_polyline on
+  // listing_transport_summaries, captured by /api/transport/refresh from a Directions request it
+  // already makes for the drive-time estimate).
+  const airportRouteCoordinates = useMemo(() => {
+    const encoded = transportSummary?.driving_route_polyline;
+    if (!encoded) return null;
+    try {
+      const coordinates = decodePolyline(encoded);
+      return coordinates.length > 1 ? coordinates : null;
+    } catch {
+      return null;
+    }
+  }, [transportSummary?.driving_route_polyline]);
 
   // Self-heal: a listing can exist without saved travel times (the lookup failed at creation, or was added
   // before the feature). When its OWNER views it, ask for them once per browser session. The endpoint checks
@@ -743,6 +762,8 @@ export default function ListingDetail() {
                 publicTransportTransfers={transportSummary?.public_transport_transfers ?? null}
                 publicTransportFirstDeparture={transportSummary?.public_transport_first_departure ?? null}
                 directionsUrl={airportDirectionsUrl}
+                routeCoordinates={airportRouteCoordinates}
+                mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
               />
               <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
                 <div>

@@ -1,6 +1,9 @@
+import dynamic from "next/dynamic";
 import { BusFront, CarTaxiFront, TrainFront } from "lucide-react";
 
 import { classifyTransitModes, isValidClockTime } from "@/lib/transportTimes";
+
+const MapView = dynamic(() => import("@/components/map"), { ssr: false });
 
 type Props = {
   airportCode?: string | null;
@@ -14,6 +17,9 @@ type Props = {
   publicTransportFirstDeparture?: string | null;
   // Optional Google Maps directions link from the stay to the airport.
   directionsUrl?: string | null;
+  // Decoded driving route (stay -> airport), already stored -- drawing it costs no API call.
+  routeCoordinates?: [number, number][] | null;
+  mapboxAccessToken?: string;
 };
 
 const AIRPORT_NAME_MAP: Record<string, string> = {
@@ -66,6 +72,8 @@ export default function AirportAccessCard({
   publicTransportTransfers,
   publicTransportFirstDeparture,
   directionsUrl,
+  routeCoordinates,
+  mapboxAccessToken,
 }: Props) {
   const code =
     typeof airportCode === "string" && airportCode.trim() ? airportCode.trim().toUpperCase() : null;
@@ -94,6 +102,9 @@ export default function AirportAccessCard({
   const transitDetail = [changes, firstService].filter(Boolean).join(" · ") || null;
 
   const hasTimes = roadMinutes != null || transitMinutes != null;
+  const hasRoute = Array.isArray(routeCoordinates) && routeCoordinates.length > 1;
+  const routeStart = hasRoute ? routeCoordinates![0] : null;
+  const routeAirportCoords = hasRoute ? routeCoordinates![routeCoordinates!.length - 1] : null;
 
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
@@ -128,6 +139,26 @@ export default function AirportAccessCard({
               <AccessRow Icon={TransitIcon} label={transitLabel} detail={transitDetail} minutes={transitMinutes} />
             ) : null}
           </ul>
+          {hasRoute && routeStart && routeAirportCoords ? (
+            <div className="mt-5 h-48 overflow-hidden rounded-2xl border border-slate-200 sm:h-56">
+              <MapView
+                mapboxAccessToken={mapboxAccessToken}
+                mapStyle="mapbox://styles/mapbox/navigation-day-v1"
+                theme="uber"
+                latitude={routeStart[1]}
+                longitude={routeStart[0]}
+                zoom={11}
+                style={{ width: "100%", height: "100%" }}
+                className="h-full"
+                listings={[]}
+                routeCoordinates={routeCoordinates}
+                airportCode={code ?? undefined}
+                airportCoords={routeAirportCoords}
+                showAirportLabel={false}
+                fitToPins
+              />
+            </div>
+          ) : null}
           <p className="mt-5 text-xs leading-5 text-slate-500">
             Estimates for a quiet weekday. Allow extra at busy times, and check public transport if you
             travel very early or late.

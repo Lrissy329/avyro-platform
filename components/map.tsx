@@ -17,6 +17,12 @@ const NavigationControl = dynamic(
   () => import("react-map-gl").then((m: any) => m.NavigationControl),
   { ssr: false }
 ) as any;
+const Source = dynamic(() => import("react-map-gl").then((m: any) => m.Source), {
+  ssr: false,
+}) as any;
+const Layer = dynamic(() => import("react-map-gl").then((m: any) => m.Layer), {
+  ssr: false,
+}) as any;
 
 type ListingPin = {
   id: string;
@@ -70,6 +76,10 @@ type AeronoocMapProps = {
   onMarkerDragEnd?: (lat: number, lng: number) => void;
   onBoundsChange?: (bounds: { north: number; south: number; east: number; west: number }) => void;
   fitToPins?: boolean;
+  /** Draws a line following these [lng, lat] points (e.g. a decoded driving route). Only used to
+   * fit the map's bounds when there are no listing pins -- the property/search map's own pin-
+   * fitting behavior is unchanged. */
+  routeCoordinates?: [number, number][] | null;
 };
 
 function toNumber(value: unknown): number | null {
@@ -218,6 +228,7 @@ export default function AeronoocMap({
   onMarkerDragEnd,
   onBoundsChange,
   fitToPins = true,
+  routeCoordinates = null,
 }: AeronoocMapProps) {
   const token = mapboxAccessToken || process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const mapRef = useRef<any>(null);
@@ -377,9 +388,13 @@ export default function AeronoocMap({
     const map = mapRef.current?.getMap?.();
     if (!map) return;
     if (!fitToPins) return;
+    const routeKey =
+      routeCoordinates && routeCoordinates.length > 1
+        ? `${routeCoordinates.length}:${routeCoordinates[0].join(",")}:${routeCoordinates[routeCoordinates.length - 1].join(",")}`
+        : "none";
     const fitKey = `${markerPins
       .map((pin) => `${pin.id}:${pin.longitude.toFixed(5)}:${pin.latitude.toFixed(5)}`)
-      .join("|")}|${airportCoords ? airportCoords.join(",") : "none"}`;
+      .join("|")}|${airportCoords ? airportCoords.join(",") : "none"}|${routeKey}`;
     if (fitKey === lastFitRef.current) return;
     lastFitRef.current = fitKey;
 
@@ -446,10 +461,25 @@ export default function AeronoocMap({
       return;
     }
 
+    if (routeCoordinates && routeCoordinates.length > 1) {
+      const lngs = routeCoordinates.map((point) => point[0]);
+      const lats = routeCoordinates.map((point) => point[1]);
+      const bounds: [[number, number], [number, number]] = [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ];
+      map.fitBounds(bounds, {
+        padding: { top: 48, right: 48, bottom: 48, left: 48 },
+        maxZoom: 13.4,
+        duration: 500,
+      });
+      return;
+    }
+
     if (airportCoords) {
       map.flyTo({ center: airportCoords, zoom: 10.2, essential: true });
     }
-  }, [airportCoords, fitToPins, mapReady, markerPins]);
+  }, [airportCoords, fitToPins, mapReady, markerPins, routeCoordinates]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -557,6 +587,23 @@ export default function AeronoocMap({
           style={{ margin: 16, zIndex: theme === "uber" ? 12 : 10 }}
         />
 
+        {routeCoordinates && routeCoordinates.length > 1 && (
+          <Source
+            type="geojson"
+            data={{
+              type: "Feature",
+              properties: {},
+              geometry: { type: "LineString", coordinates: routeCoordinates },
+            }}
+          >
+            <Layer
+              type="line"
+              layout={{ "line-join": "round", "line-cap": "round" }}
+              paint={{ "line-color": "#0B0D10", "line-width": 4, "line-opacity": 0.85 }}
+            />
+          </Source>
+        )}
+
         {markerPins.map((pin) => {
           const isHover = hoverId === pin.id;
           const isActive = activeId === pin.id;
@@ -592,6 +639,13 @@ export default function AeronoocMap({
             <span className="inline-flex items-center justify-center rounded-full border border-neutral-300 bg-white px-2 py-1 text-[11px] font-semibold text-neutral-700 shadow-[0_8px_18px_rgba(15,23,42,0.08)]">
               <span className="font-mono tabular-nums">{airportCode}</span> ✈
             </span>
+          </Marker>
+        )}
+
+        {/* Route start point (the stay itself), only relevant alongside a drawn route */}
+        {routeCoordinates && routeCoordinates.length > 1 && (
+          <Marker longitude={routeCoordinates[0][0]} latitude={routeCoordinates[0][1]} anchor="bottom">
+            <span className="block h-4 w-4 rounded-full border-2 border-white bg-[#0B0D10] shadow-[0_4px_10px_rgba(15,23,42,0.3)]" />
           </Marker>
         )}
 

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import SearchBar from "@/components/SearchBar";
 import { isMissingColumnError } from "@/lib/flexStay";
 import { computeGuestStayPricing, computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import { SUPPORT_EMAIL } from "@/lib/support";
 import { withTransportSummaries } from "@/lib/transportSummaries";
 import { supabase } from "@/lib/supabaseClient";
@@ -331,15 +332,18 @@ export default function Home() {
       const baseColumns =
         "id, title, airport_code, location, booking_unit, price_per_night, price_per_hour, is_shared_stay, shared_total_spots, shared_weekly_price_pence";
       const transportColumns = ", drive_minutes_offpeak, taxi_typical_minutes, taxi_duration_minutes";
-      const fetchRows = (columns: string) =>
-        supabase
+      const fetchRows = (columns: string) => {
+        let query = supabase
           .from("listings")
           .select(columns)
           .not("airport_code", "is", null)
           // MVP: same as search, nightly inventory only.
-          .or("booking_unit.eq.nightly,booking_unit.is.null")
-          .order("created_at", { ascending: false })
-          .limit(60);
+          .or("booking_unit.eq.nightly,booking_unit.is.null");
+        // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+        // Shared listings are excluded from the homepage while the feature is off.
+        if (!SHARED_STAYS_ENABLED) query = query.not("is_shared_stay", "is", true);
+        return query.order("created_at", { ascending: false }).limit(60);
+      };
 
       let result: { data: unknown; error: { code?: string; message?: string } | null } =
         await fetchRows(baseColumns + transportColumns);
@@ -385,7 +389,10 @@ export default function Home() {
     };
   }, []);
 
-  const homepageListings = isPreviewMode ? PREVIEW_LISTINGS : liveListings;
+  // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md (the dev-only preview sample includes a shared listing)
+  const homepageListings = isPreviewMode
+    ? PREVIEW_LISTINGS.filter((listing) => SHARED_STAYS_ENABLED || !listing.isSharedStay)
+    : liveListings;
   const previewListings = useMemo(() => homepageListings.slice(0, 3), [homepageListings]);
 
   // Everything below the hero is built from real listings only, never preview data.
@@ -456,7 +463,8 @@ export default function Home() {
 
   const featureStrip = [
     { title: "Airport-first search", icon: AirportPinIcon },
-    { title: "Flexible and shared stays", icon: CalendarRangeIcon },
+    // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+    { title: SHARED_STAYS_ENABLED ? "Flexible and shared stays" : "Flexible stays", icon: CalendarRangeIcon },
     { title: "Transparent pricing", icon: CardCheckIcon },
     { title: "Secure payments via Stripe", icon: CardIcon },
   ];
@@ -785,12 +793,18 @@ export default function Home() {
               {
                 step: "02",
                 title: "Choose how you stay",
-                body: "Overnight, flexible or shared, with the price shown up front.",
+                // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+                body: SHARED_STAYS_ENABLED
+                  ? "Overnight, flexible or shared, with the price shown up front."
+                  : "Overnight or flexible, with the price shown up front.",
                 visual: (
                   <div className="inline-flex rounded-full bg-white/10 p-1 text-sm font-medium ring-1 ring-white/10">
                     <span className="rounded-full bg-white px-4 py-2 text-slate-950">Overnight</span>
                     <span className="px-4 py-2 text-white/70">Flexible</span>
-                    <span className="px-4 py-2 text-white/70">Shared</span>
+                    {/* SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md */}
+                    {SHARED_STAYS_ENABLED ? (
+                      <span className="px-4 py-2 text-white/70">Shared</span>
+                    ) : null}
                   </div>
                 ),
               },
@@ -850,12 +864,28 @@ export default function Home() {
           <SectionHeader
             eyebrow="Stay formats"
             title="Built for rosters that change."
-            body="Book the way your schedule works: a fixed stay, room to extend, or a shared stay to split the cost."
+            // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+            body={
+              SHARED_STAYS_ENABLED
+                ? "Book the way your schedule works: a fixed stay, room to extend, or a shared stay to split the cost."
+                : "Book the way your schedule works: a fixed stay, or room to extend if plans change."
+            }
           />
 
-          <div className="mt-12 grid gap-5 lg:grid-cols-2">
-            <article className="flex flex-col overflow-hidden rounded-[32px] bg-gradient-to-b from-[#f8f9fb] to-[#eef0f4] ring-1 ring-slate-200/70">
-              <div className="relative aspect-[16/9] w-full">
+          {/* SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md: with the Shared card hidden, the Flexible card is full-width and horizontal on desktop. */}
+          <div className={cx("mt-12 grid gap-5", SHARED_STAYS_ENABLED && "lg:grid-cols-2")}>
+            <article
+              className={cx(
+                "flex flex-col overflow-hidden rounded-[32px] bg-gradient-to-b from-[#f8f9fb] to-[#eef0f4] ring-1 ring-slate-200/70",
+                !SHARED_STAYS_ENABLED && "lg:grid lg:grid-cols-2"
+              )}
+            >
+              <div
+                className={cx(
+                  "relative aspect-[16/9] w-full",
+                  !SHARED_STAYS_ENABLED && "lg:aspect-auto lg:h-full lg:min-h-[400px]"
+                )}
+              >
                 <Image
                   src="/images/formats/flexible-stay.webp"
                   alt="Illustration of a bedroom with a suitcase and a calendar by the bed, with an airport visible through the window"
@@ -864,7 +894,12 @@ export default function Home() {
                   className="object-cover"
                 />
               </div>
-              <div className="flex flex-1 flex-col p-8 lg:p-10">
+              <div
+                className={cx(
+                  "flex flex-1 flex-col p-8 lg:p-10",
+                  !SHARED_STAYS_ENABLED && "lg:justify-center lg:p-14"
+                )}
+              >
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8a6a00]">
                   Flexible stays
                 </p>
@@ -882,7 +917,7 @@ export default function Home() {
                   Where a host offers flexibility, you can add an extra night or extend without
                   rebooking as your roster moves. You&apos;re only charged if you extend.
                 </p>
-                <div className="mt-auto pt-8">
+                <div className={cx("pt-8", SHARED_STAYS_ENABLED ? "mt-auto" : "lg:pt-10")}>
                   <button
                     type="button"
                     onClick={() =>
@@ -900,6 +935,8 @@ export default function Home() {
               </div>
             </article>
 
+            {/* SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md */}
+            {SHARED_STAYS_ENABLED ? (
             <article className="flex flex-col overflow-hidden rounded-[32px] bg-slate-950 text-white ring-1 ring-white/10">
               <div className="relative aspect-[16/9] w-full">
                 <Image
@@ -950,6 +987,7 @@ export default function Home() {
                 </div>
               </div>
             </article>
+            ) : null}
           </div>
         </div>
       </section>
@@ -1025,7 +1063,10 @@ export default function Home() {
                   title: "Product",
                   links: [
                     { label: "Search stays", href: "/search" },
-                    { label: "Shared stays", href: "/search?shared_stays=true" },
+                    // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+                    ...(SHARED_STAYS_ENABLED
+                      ? [{ label: "Shared stays", href: "/search?shared_stays=true" }]
+                      : []),
                   ],
                 },
                 {

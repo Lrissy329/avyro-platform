@@ -1,3 +1,4 @@
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import type { NextApiRequest, NextApiResponse } from "next";
 
 import {
@@ -157,6 +158,10 @@ export default async function handler(
       return res.status(500).json({ error: listingError.message ?? "Failed to load listing flex settings." });
     }
     const isSharedStayListing = Boolean((listingRow as any)?.is_shared_stay);
+    // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+    if (isSharedStayListing && !SHARED_STAYS_ENABLED) {
+      return res.status(404).json({ error: "Listing not found." });
+    }
 
     const { booked, blocked, held } = await loadUnavailableNightSets({
       supabase,

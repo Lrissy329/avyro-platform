@@ -15,6 +15,7 @@ import {
   getServiceFeeRate,
 } from "@/lib/pricing";
 import { mapAmenities } from "@/lib/amenities";
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import { SUPPORT_EMAIL } from "@/lib/support";
 import {
   ChatBubbleLeftRightIcon,
@@ -310,6 +311,13 @@ export default function ListingDetail() {
         return;
       }
       const data = listingPayload as DbListing;
+      // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+      // A shared-stay listing shows the normal "Listing not found." while the feature is off.
+      if (data.is_shared_stay && !SHARED_STAYS_ENABLED) {
+        setListing(null);
+        setLoading(false);
+        return;
+      }
       let rawPhotos: unknown = data.photos;
       if (typeof rawPhotos === "string") {
         try {

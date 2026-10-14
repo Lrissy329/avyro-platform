@@ -1,3 +1,4 @@
+import { SHARED_STAYS_DISABLED_BODY, SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { stripe } from "@/lib/stripe";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
@@ -119,6 +120,11 @@ export default async function handler(
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+  if (!SHARED_STAYS_ENABLED) {
+    return res.status(404).json(SHARED_STAYS_DISABLED_BODY);
   }
 
   const authHeader = req.headers.authorization ?? "";

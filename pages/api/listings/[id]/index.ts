@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import { getSupabaseServerClient } from "@/lib/supabaseServer";
 
 const isMissingColumn = (error: any) => {
@@ -140,6 +141,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: error.message });
   }
   if (!row) {
+    return res.status(404).json({ error: "Listing not found." });
+  }
+  // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+  // A shared-stay listing does not exist as far as the public is concerned while the feature is off.
+  if (!SHARED_STAYS_ENABLED && row.is_shared_stay) {
     return res.status(404).json({ error: "Listing not found." });
   }
 

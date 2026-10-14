@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import AeronoocMap from "@/components/map";
 import { AMENITY_SCHEMA, type AmenitySchema, getAmenityIcon } from "@/lib/amenities";
 import { computeSharedPerPersonWeeklyPricePence } from "@/lib/pricing";
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import { useRouter } from "next/router";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -95,6 +96,13 @@ const LISTING_MODEL_OPTIONS = [
     enableShared: true,
   },
 ] as const;
+
+// SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+// Hosts cannot choose the Shared stay model while the feature is off. The full array above stays so
+// lookups and the shared form fields keep working when the flag is switched back on.
+const VISIBLE_LISTING_MODEL_OPTIONS = LISTING_MODEL_OPTIONS.filter(
+  (option) => SHARED_STAYS_ENABLED || option.value !== "shared"
+);
 
 const RENTAL_TYPE_CONFIG: Record<
   string,
@@ -532,6 +540,7 @@ export default function CreateListing() {
   };
 
   const handleModelSelect = (modelValue: string) => {
+    if (modelValue === "shared" && !SHARED_STAYS_ENABLED) return; // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
     const selectedModel =
       LISTING_MODEL_OPTIONS.find((option) => option.value === modelValue) ??
       LISTING_MODEL_OPTIONS[0];
@@ -994,7 +1003,7 @@ export default function CreateListing() {
                 Choose the product model first. Pricing and setup fields will adapt automatically.
               </p>
               <div className="grid grid-cols-1 gap-4 mb-8 md:grid-cols-2">
-                {LISTING_MODEL_OPTIONS.map((option) => (
+                {VISIBLE_LISTING_MODEL_OPTIONS.map((option) => (
                   <button
                     type="button"
                     key={option.value}

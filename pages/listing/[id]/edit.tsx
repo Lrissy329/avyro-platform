@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
+import { SHARED_STAYS_ENABLED } from "@/lib/featureFlags";
 import { DayPicker, type DateRange } from "react-day-picker";
 import { HostShellLayout } from "@/components/host/HostShellLayout";
 import { HostPageHeader } from "@/components/host/HostPageHeader";
@@ -324,7 +325,8 @@ export default function EditListingPage() {
     if (!form || !id) return;
     setSaving(true);
     setFormError(null);
-    if (form.is_shared_stay) {
+    // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md (hidden shared fields must never block a save)
+    if (SHARED_STAYS_ENABLED && form.is_shared_stay) {
       if (!Number.isFinite(Number(form.shared_weekly_price_gbp)) || Number(form.shared_weekly_price_gbp) <= 0) {
         setSaving(false);
         setFormError("Total shared weekly price must be greater than zero.");
@@ -450,6 +452,18 @@ export default function EditListingPage() {
           )
         : null,
     };
+
+    // SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md
+    // While the feature is off the form does not show, and must not touch, the shared fields, so a save
+    // leaves whatever is stored (is_shared_stay and every shared_* column) exactly as it was.
+    if (!SHARED_STAYS_ENABLED) {
+      delete payload.is_shared_stay;
+      delete payload.shared_total_spots;
+      delete payload.shared_weekly_price_pence;
+      delete payload.shared_join_mode;
+      delete payload.shared_min_weeks;
+      delete payload.shared_max_weeks;
+    }
 
     if (bookingUnit === "nightly") {
       payload.price_per_night = parseMoney(form.price_per_night);
@@ -633,6 +647,9 @@ export default function EditListingPage() {
               </div>
             ) : null}
 
+            {/* SHARED_STAYS (disabled for launch): see docs/shared-stays-hidden.md */}
+            {SHARED_STAYS_ENABLED ? (
+            <>
             <label className="mt-4 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
               <input
                 type="checkbox"
@@ -699,6 +716,8 @@ export default function EditListingPage() {
                   />
                 </div>
               </div>
+            ) : null}
+            </>
             ) : null}
           </section>
 

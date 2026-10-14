@@ -28,7 +28,12 @@ export default function MyApp({ Component, pageProps }: AppProps) {
   const hideGlobalHeader = Boolean((Component as any).hideGlobalHeader);
   const hideHeaderForRoute =
     router.pathname.startsWith("/ops") ||
-    router.pathname.startsWith("/admin");
+    router.pathname.startsWith("/admin") ||
+    // Host and guest pages carry their own full nav (HostShellLayout / GuestShellLayout
+    // sidebars), which duplicated the global header's links almost verbatim -- same fix
+    // already applied to /ops and /admin above.
+    router.pathname.startsWith("/host") ||
+    router.pathname.startsWith("/guest");
   const showGlobalHeader = !hideGlobalHeader && !hideHeaderForRoute;
 
   return (

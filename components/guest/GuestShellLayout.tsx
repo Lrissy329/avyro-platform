@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
 import { SUPPORT_EMAIL } from "@/lib/support";
+import { useMessagesUnreadCount } from "@/lib/useMessagesUnreadCount";
 
 type NavKey = "trips" | "messages" | "reviews" | "payments" | "profile";
 
@@ -13,13 +14,6 @@ type GuestShellLayoutProps = {
   activeNav?: NavKey;
   title?: string;
   children: ReactNode;
-};
-
-type ConversationRow = {
-  id: string;
-  host_id: string;
-  guest_id: string;
-  last_message_at: string | null;
 };
 
 const navItems: Array<{ key: NavKey; label: string; href: string }> = [
@@ -33,7 +27,6 @@ const navItems: Array<{ key: NavKey; label: string; href: string }> = [
 export function GuestShellLayout({ activeNav, title, children }: GuestShellLayoutProps) {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
-  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -41,49 +34,7 @@ export function GuestShellLayout({ activeNav, title, children }: GuestShellLayou
     });
   }, []);
 
-  const refreshUnread = useCallback(async () => {
-    if (!userId) return;
-
-    const { data: conversations, error: conversationError } = await supabase
-      .from("conversations")
-      .select("id, host_id, guest_id, last_message_at")
-      .or(`host_id.eq.${userId},guest_id.eq.${userId}`);
-
-    if (conversationError || !conversations) {
-      return;
-    }
-
-    const unread = (conversations as ConversationRow[]).reduce((count, conversation) => {
-      if (!conversation.last_message_at) return count;
-      return count + 1;
-    }, 0);
-
-    setUnreadCount(unread);
-  }, [userId]);
-
-  useEffect(() => {
-    if (!userId) return;
-
-    refreshUnread();
-
-    const channel = supabase
-      .channel(`guest-messages-unread:${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "conversations" },
-        (payload) => {
-          const row = payload.new as ConversationRow | null;
-          if (!row) return;
-          if (row.host_id !== userId && row.guest_id !== userId) return;
-          refreshUnread();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId, refreshUnread]);
+  const unreadCount = useMessagesUnreadCount(userId, "guest-messages-unread");
 
   const normalizePath = useCallback((value: string) => {
     const [withoutHash] = value.split("#");

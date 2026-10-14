@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabaseClient";
+import { useMessagesUnreadCount } from "@/lib/useMessagesUnreadCount";
 
 type NavKey =
   | "dashboard"
@@ -23,13 +24,6 @@ type HostShellLayoutProps = {
   activeNav?: NavKey;
   variant?: "default" | "wide";
   children: ReactNode;
-};
-
-type ConversationRow = {
-  id: string;
-  host_id: string;
-  guest_id: string;
-  last_message_at: string | null;
 };
 
 const navItems: Array<{ key: NavKey; label: string; href: string; section: "Main" | "Finance" | "Utility" }> =
@@ -52,7 +46,6 @@ export function HostShellLayout({
 }: HostShellLayoutProps) {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
-  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -60,47 +53,7 @@ export function HostShellLayout({
     });
   }, []);
 
-  const refreshUnread = useCallback(async () => {
-    if (!userId) return;
-    const { data: conversations, error: conversationError } = await supabase
-      .from("conversations")
-      .select("id, host_id, guest_id, last_message_at")
-      .or(`host_id.eq.${userId},guest_id.eq.${userId}`);
-
-    if (conversationError || !conversations) {
-      return;
-    }
-
-    const unread = (conversations as ConversationRow[]).reduce((count, convo) => {
-      if (!convo.last_message_at) return count;
-      return count + 1;
-    }, 0);
-
-    setUnreadCount(unread);
-  }, [userId]);
-
-  useEffect(() => {
-    if (!userId) return;
-    refreshUnread();
-
-    const channel = supabase
-      .channel(`host-messages-unread:${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "conversations" },
-        (payload) => {
-          const row = payload.new as ConversationRow | null;
-          if (!row) return;
-          if (row.host_id !== userId && row.guest_id !== userId) return;
-          refreshUnread();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId, refreshUnread]);
+  const unreadCount = useMessagesUnreadCount(userId, "host-messages-unread");
 
   const normalizePath = useCallback((value: string) => {
     const [withoutHash] = value.split("#");
@@ -118,7 +71,7 @@ export function HostShellLayout({
     <div className="flex min-h-screen bg-slate-50">
       <aside className="hidden w-64 shrink-0 border-r border-slate-200 bg-white px-4 pb-6 pt-4 lg:flex lg:flex-col">
         <div className="flex items-center gap-2 px-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-slate-900 text-xs font-semibold uppercase text-white">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-900 text-xs font-semibold uppercase text-white">
             fx
           </div>
           <div className="flex flex-col">
